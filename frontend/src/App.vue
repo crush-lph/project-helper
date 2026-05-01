@@ -115,12 +115,12 @@ function streamAnalysis(projectId) {
   })
   events.addEventListener('done', async () => {
     progress.value.push({ step: 'done', message: '分析完成，报告已保存到本地缓存。' })
+    loading.value = false
+    events.close()
     const response = await fetch(`${API_BASE}/api/projects/${projectId}`)
     if (response.ok) {
       activeProject.value = await response.json()
     }
-    loading.value = false
-    events.close()
     await refreshProjects()
   })
   events.addEventListener('failed', (event) => {
