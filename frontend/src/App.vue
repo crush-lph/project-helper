@@ -1,8 +1,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
+import { useDialog } from 'naive-ui'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+const dialog = useDialog()
 
 const repoUrl = ref('https://github.com/fastapi/fastapi')
 const activeProject = ref(null)
@@ -13,6 +15,7 @@ const error = ref('')
 const question = ref('这个项目的启动流程是什么？')
 const chatMessages = ref([])
 const asking = ref(false)
+const busyProjectId = ref('')
 
 const pipelineSteps = [
   { key: 'connect', label: '建立任务', hint: '创建项目并连接实时通道' },
@@ -148,6 +151,76 @@ async function loadProject(project) {
   chatMessages.value = []
 }
 
+async function togglePinned(project) {
+  if (busyProjectId.value) return
+  busyProjectId.value = project.id
+  error.value = ''
+  try {
+    const response = await fetch(`${API_BASE}/api/projects/${project.id}/pin`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned: !project.pinned }),
+    })
+    if (!response.ok) {
+      const detail = await response.json()
+      throw new Error(detail.detail || '置顶状态更新失败')
+    }
+    const updatedProject = await response.json()
+    if (activeProject.value?.id === updatedProject.id) {
+      activeProject.value = { ...activeProject.value, ...updatedProject }
+    }
+    await refreshProjects()
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busyProjectId.value = ''
+  }
+}
+
+async function performDeleteProject(project) {
+  busyProjectId.value = project.id
+  error.value = ''
+  try {
+    const response = await fetch(`${API_BASE}/api/projects/${project.id}`, { method: 'DELETE' })
+    if (!response.ok) {
+      const detail = await response.json()
+      throw new Error(detail.detail || '删除项目失败')
+    }
+    if (activeProject.value?.id === project.id) {
+      activeProject.value = null
+      progress.value = []
+      chatMessages.value = []
+    }
+    await refreshProjects()
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busyProjectId.value = ''
+  }
+}
+
+function deleteProject(project) {
+  if (busyProjectId.value) return
+
+  dialog.warning({
+    title: '删除缓存项目',
+    content: `确定删除「${project.name}」的缓存记录和本地仓库副本吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+    maskClosable: false,
+    positiveButtonProps: {
+      type: 'error',
+      ghost: false,
+    },
+    negativeButtonProps: {
+      ghost: true,
+    },
+    onPositiveClick: async () => {
+      await performDeleteProject(project)
+    },
+  })
+}
+
 async function askQuestion() {
   if (!question.value.trim() || !activeProject.value) return
   asking.value = true
@@ -235,10 +308,40 @@ onMounted(refreshProjects)
           <FolderGit2 :size="18" />
           <span>已分析项目</span>
         </div>
-        <button v-for="project in projects" :key="project.id" class="project-item" @click="loadProject(project)">
-          <strong>{{ project.name }}</strong>
-          <small>{{ project.status }} · {{ project.repo_url }}</small>
-        </button>
+        <div
+          v-for="project in projects"
+          :key="project.id"
+          :class="['project-item', { active: activeProject?.id === project.id, pinned: project.pinned }]"
+        >
+          <button class="project-load" :disabled="busyProjectId === project.id" @click="loadProject(project)">
+            <span class="project-name-row">
+              <Pin v-if="project.pinned" :size="14" />
+              <strong>{{ project.name }}</strong>
+            </span>
+            <small>{{ project.status }} · {{ project.repo_url }}</small>
+          </button>
+          <div class="project-actions" aria-label="项目操作">
+            <button
+              class="icon-button"
+              :title="project.pinned ? '取消置顶' : '置顶'"
+              :aria-label="project.pinned ? '取消置顶' : '置顶'"
+              :disabled="busyProjectId === project.id"
+              @click="togglePinned(project)"
+            >
+              <PinOff v-if="project.pinned" :size="16" />
+              <Pin v-else :size="16" />
+            </button>
+            <button
+              class="icon-button danger"
+              title="删除"
+              aria-label="删除"
+              :disabled="busyProjectId === project.id"
+              @click="deleteProject(project)"
+            >
+              <Trash2 :size="16" />
+            </button>
+          </div>
+        </div>
         <p v-if="!projects.length" class="muted">还没有缓存项目。</p>
       </aside>
 

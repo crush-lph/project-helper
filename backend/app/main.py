@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -26,6 +29,10 @@ app.add_middleware(
 
 class ProjectCreate(BaseModel):
     repo_url: HttpUrl
+
+
+class ProjectPinUpdate(BaseModel):
+    pinned: bool
 
 
 class ChatRequest(BaseModel):
@@ -70,6 +77,32 @@ def get_project(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
+
+
+@app.patch("/api/projects/{project_id}/pin")
+def update_project_pin(project_id: str, payload: ProjectPinUpdate):
+    project = db.set_pinned(project_id, payload.pinned)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return project
+
+
+@app.delete("/api/projects/{project_id}", status_code=204)
+def delete_project(project_id: str):
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    deleted = db.delete_project(project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    local_path = Path(project["local_path"]).resolve()
+    clone_root = settings.clone_dir.resolve()
+    if local_path == clone_root or clone_root not in local_path.parents:
+        return None
+    shutil.rmtree(local_path, ignore_errors=True)
+    return None
 
 
 @app.get("/api/projects/{project_id}/analyze/stream")

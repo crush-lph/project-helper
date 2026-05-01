@@ -77,6 +77,15 @@ def test_project_create_analyze_cache_and_chat_flow(monkeypatch, tmp_path):
     assert listed.status_code == 200
     assert listed.json()["projects"][0]["report"] == ""
 
+    pinned = client.patch(f"/api/projects/{project['id']}/pin", json={"pinned": True})
+    assert pinned.status_code == 200
+    assert pinned.json()["pinned"] is True
+
+    deleted = client.delete(f"/api/projects/{project['id']}")
+    assert deleted.status_code == 204
+    assert db.get_project(project["id"]) is None
+    assert not (settings.clone_dir / project["id"]).exists()
+
 
 def test_api_rejects_invalid_project_and_empty_chat(monkeypatch, tmp_path):
     install_test_runtime(monkeypatch, tmp_path)
@@ -93,3 +102,9 @@ def test_api_rejects_invalid_project_and_empty_chat(monkeypatch, tmp_path):
 
     missing = client.get("/api/projects/missing")
     assert missing.status_code == 404
+
+    missing_pin = client.patch("/api/projects/missing/pin", json={"pinned": True})
+    assert missing_pin.status_code == 404
+
+    missing_delete = client.delete("/api/projects/missing")
+    assert missing_delete.status_code == 404

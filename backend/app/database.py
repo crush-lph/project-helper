@@ -43,6 +43,9 @@ class Database:
                 )
                 """
             )
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
+            if "pinned_at" not in columns:
+                conn.execute("ALTER TABLE projects ADD COLUMN pinned_at TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_repo_url ON projects(repo_url)")
 
     def upsert_project(self, project: dict[str, Any]) -> dict[str, Any]:
@@ -80,7 +83,15 @@ class Database:
 
     def list_projects(self, include_report: bool = True) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM projects ORDER BY updated_at DESC").fetchall()
+            rows = conn.execute(
+                """
+                SELECT * FROM projects
+                ORDER BY
+                    CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END,
+                    pinned_at DESC,
+                    updated_at DESC
+                """
+            ).fetchall()
         projects = [self._row_to_project(row) for row in rows]
         if not include_report:
             for project in projects:
@@ -110,8 +121,24 @@ class Database:
                 (report, json.dumps(summary, ensure_ascii=False), utc_now(), project_id),
             )
 
+    def set_pinned(self, project_id: str, pinned: bool) -> dict[str, Any] | None:
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE projects SET pinned_at = ?, updated_at = ? WHERE id = ?",
+                (now if pinned else None, now, project_id),
+            )
+            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return self._row_to_project(row) if row else None
+
+    def delete_project(self, project_id: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        return cursor.rowcount > 0
+
     @staticmethod
     def _row_to_project(row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)
         data["summary"] = json.loads(data.pop("summary_json") or "{}")
+        data["pinned"] = bool(data.get("pinned_at"))
         return data

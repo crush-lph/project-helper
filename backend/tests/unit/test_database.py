@@ -45,3 +45,22 @@ def test_upsert_existing_repo_preserves_existing_status_and_report(tmp_path):
     assert updated["local_path"] == "/tmp/new"
     assert updated["status"] == "ready"
     assert updated["report"] == "# Old report"
+
+
+def test_pin_order_and_delete_project(tmp_path):
+    db = Database(tmp_path / "project_helper.sqlite3")
+    db.upsert_project(sample_project(id="project-1", repo_url="https://github.com/owner/one", name="one"))
+    db.upsert_project(sample_project(id="project-2", repo_url="https://github.com/owner/two", name="two"))
+
+    pinned = db.set_pinned("project-1", True)
+
+    assert pinned["pinned"] is True
+    assert db.list_projects(include_report=False)[0]["id"] == "project-1"
+
+    unpinned = db.set_pinned("project-1", False)
+
+    assert unpinned["pinned"] is False
+    assert unpinned["pinned_at"] is None
+    assert db.delete_project("project-1") is True
+    assert db.get_project("project-1") is None
+    assert db.delete_project("project-1") is False
