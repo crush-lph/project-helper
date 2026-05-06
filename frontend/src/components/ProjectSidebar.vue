@@ -10,9 +10,9 @@ const emit = defineEmits(['delete', 'load', 'toggle-pin'])
 
 <template>
   <aside class="sidebar">
-    <div class="panel-title">
-      <FolderGit2 :size="18" />
-      <span>已分析项目</span>
+    <div class="panel-title sidebar-title">
+      <span><FolderGit2 :size="20" />已分析项目</span>
+      <span class="status-badge compact"><CheckCircle2 :size="16" />已缓存</span>
     </div>
     <div
       v-for="project in projects"
@@ -20,15 +20,19 @@ const emit = defineEmits(['delete', 'load', 'toggle-pin'])
       :class="['project-item', { active: activeProjectId === project.id, pinned: project.pinned }]"
     >
       <button class="project-load" :disabled="busyProjectId === project.id" @click="emit('load', project)">
-        <span class="project-name-row">
-          <Pin v-if="project.pinned" :size="14" />
-          <strong>{{ project.name }}</strong>
+        <span class="project-icon">
+          <Zap v-if="project.pinned" :size="18" />
+          <Activity v-else-if="project.status !== 'ready'" :size="18" />
+          <Blocks v-else :size="18" />
         </span>
-        <small>{{ project.status }} · {{ project.repo_url }}</small>
+        <span class="project-copy">
+          <strong>{{ project.name }}</strong>
+          <small>{{ project.status }} · {{ project.repo_url }}</small>
+        </span>
       </button>
       <div class="project-actions" aria-label="项目操作">
         <button
-          class="icon-button"
+          :class="['icon-button', { pinned: project.pinned }]"
           :title="project.pinned ? '取消置顶' : '置顶'"
           :aria-label="project.pinned ? '取消置顶' : '置顶'"
           :disabled="busyProjectId === project.id"

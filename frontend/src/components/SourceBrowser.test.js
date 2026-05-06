@@ -6,9 +6,14 @@ const iconStubs = {
   ChevronDown: true,
   ChevronRight: true,
   FileText: true,
+  FileCode2: true,
+  Filter: true,
   FolderOpen: true,
+  FolderTree: true,
   Loader2: true,
+  RefreshCw: true,
   Search: true,
+  ScanSearch: true,
 }
 
 describe('SourceBrowser', () => {
@@ -72,5 +77,22 @@ describe('SourceBrowser', () => {
     })
 
     expect(wrapper.text()).toContain('server.py')
+  })
+
+  it('renders source preview with syntax highlighting', () => {
+    const wrapper = mount(SourceBrowser, {
+      props: {
+        isReady: true,
+        file: {
+          path: 'src/main.js',
+          content: 'function hello() { return "world" }',
+          size: 35,
+          truncated: false,
+        },
+      },
+      global: { stubs: iconStubs },
+    })
+
+    expect(wrapper.get('.source-code code').html()).toContain('hljs-keyword')
   })
 })

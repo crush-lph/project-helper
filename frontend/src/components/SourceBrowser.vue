@@ -1,5 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import hljs from 'highlight.js'
+import DOMPurify from 'dompurify'
 
 const props = defineProps({
   error: { type: String, default: '' },
@@ -13,6 +15,7 @@ const props = defineProps({
 const emit = defineEmits(['load-file', 'refresh'])
 const collapsedDirs = ref(new Set())
 const sourceRows = computed(() => flattenSourceTree(props.tree))
+const highlightedSource = computed(() => highlightSource(props.file?.content || '', props.file?.path || ''))
 
 watch(
   () => props.tree,
@@ -48,22 +51,56 @@ function handleRowClick(item) {
   }
   emit('load-file', item.path)
 }
+
+function highlightSource(content, path) {
+  const language = languageFromPath(path)
+  const highlighted = language
+    ? hljs.highlight(content, { language, ignoreIllegals: true }).value
+    : hljs.highlightAuto(content).value
+  return DOMPurify.sanitize(highlighted)
+}
+
+function languageFromPath(path) {
+  const extension = path.split('.').pop()?.toLowerCase()
+  const languages = {
+    cjs: 'javascript',
+    css: 'css',
+    html: 'xml',
+    js: 'javascript',
+    json: 'json',
+    jsx: 'javascript',
+    md: 'markdown',
+    mjs: 'javascript',
+    py: 'python',
+    sh: 'bash',
+    ts: 'typescript',
+    tsx: 'typescript',
+    vue: 'xml',
+    yml: 'yaml',
+    yaml: 'yaml',
+  }
+  const language = languages[extension]
+  return language && hljs.getLanguage(language) ? language : ''
+}
 </script>
 
 <template>
   <section class="source-panel">
     <div class="panel-title">
-      <FolderOpen :size="18" />
-      <span>源码浏览</span>
+      <span><ScanSearch :size="20" />源码浏览</span>
       <button v-if="isReady" class="panel-action" :disabled="loading" @click="emit('refresh')">
         <Loader2 v-if="loading" class="spin" :size="16" />
-        <FolderOpen v-else :size="16" />
+        <RefreshCw v-else :size="16" />
         <span>{{ loading ? '加载中' : '刷新目录' }}</span>
       </button>
     </div>
     <p v-if="error" class="error source-error">{{ error }}</p>
     <div v-if="isReady" class="source-browser">
       <div class="source-tree" aria-label="源码目录树">
+        <div class="source-tree-head">
+          <span class="tool-chip"><FolderTree :size="16" />目录树</span>
+          <span class="tool-chip"><Filter :size="16" />文本源码</span>
+        </div>
         <button
           v-for="item in sourceRows"
           :key="item.path"
@@ -87,10 +124,15 @@ function handleRowClick(item) {
       </div>
       <div class="source-preview">
         <div v-if="file" class="source-file-head">
-          <strong>{{ file.path }}</strong>
-          <small>{{ file.size }} bytes{{ file.truncated ? ' · 已截断' : '' }}</small>
+          <span class="file-head-main">
+            <span class="file-icon"><FileCode2 :size="18" /></span>
+            <strong>{{ file.path }}</strong>
+          </span>
+          <span class="file-actions">
+            <small>{{ file.size }} bytes{{ file.truncated ? ' · 已截断' : '' }}</small>
+          </span>
         </div>
-        <pre v-if="file" class="source-code"><code>{{ file.content }}</code></pre>
+        <pre v-if="file" class="source-code"><code v-html="highlightedSource"></code></pre>
         <div v-else class="source-placeholder">
           <Search :size="34" />
           <span>{{ fileLoading ? '正在读取文件...' : '选择一个文件查看源码' }}</span>
