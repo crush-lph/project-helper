@@ -35,6 +35,8 @@ export function useProjectHelper() {
   const activeView = ref('source')
   let activeAnalysisStream = null
   let analysisStreamToken = 0
+  let sourceTreeRequestToken = 0
+  let sourceFileRequestToken = 0
 
   const isReady = computed(() => activeProject.value?.status === 'ready')
   const workspaceTabs = computed(() => [
@@ -88,9 +90,13 @@ export function useProjectHelper() {
   }
 
   function resetSourceBrowser() {
+    sourceTreeRequestToken += 1
+    sourceFileRequestToken += 1
     sourceTree.value = []
     sourceFile.value = null
     sourceError.value = ''
+    sourceLoading.value = false
+    sourceFileLoading.value = false
   }
 
   function closeAnalysisStream() {
@@ -109,6 +115,7 @@ export function useProjectHelper() {
 
   async function fetchSourceTree(projectId = activeProject.value?.id) {
     if (!projectId || !isReady.value) return
+    const requestToken = ++sourceTreeRequestToken
     sourceLoading.value = true
     sourceError.value = ''
     try {
@@ -117,6 +124,7 @@ export function useProjectHelper() {
         throw new Error(await responseDetail(response, '源码目录加载失败'))
       }
       const data = await response.json()
+      if (requestToken !== sourceTreeRequestToken || activeProject.value?.id !== projectId) return
       sourceTree.value = data.tree || []
       if (!hasSourcePath(sourceTree.value, sourceFile.value?.path)) {
         sourceFile.value = null
@@ -125,26 +133,36 @@ export function useProjectHelper() {
         activeView.value = 'source'
       }
     } catch (err) {
+      if (requestToken !== sourceTreeRequestToken || activeProject.value?.id !== projectId) return
       sourceError.value = errorMessage(err, '源码目录加载失败')
     } finally {
-      sourceLoading.value = false
+      if (requestToken === sourceTreeRequestToken) {
+        sourceLoading.value = false
+      }
     }
   }
 
   async function loadSourceFile(path) {
-    if (!activeProject.value || !path || sourceFileLoading.value) return
+    const projectId = activeProject.value?.id
+    if (!projectId || !path || sourceFileLoading.value) return
+    const requestToken = ++sourceFileRequestToken
     sourceFileLoading.value = true
     sourceError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${activeProject.value.id}/source/file?path=${encodeURIComponent(path)}`)
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/file?path=${encodeURIComponent(path)}`)
       if (!response.ok) {
         throw new Error(await responseDetail(response, '源码文件加载失败'))
       }
-      sourceFile.value = await response.json()
+      const data = await response.json()
+      if (requestToken !== sourceFileRequestToken || activeProject.value?.id !== projectId) return
+      sourceFile.value = data
     } catch (err) {
+      if (requestToken !== sourceFileRequestToken || activeProject.value?.id !== projectId) return
       sourceError.value = errorMessage(err, '源码文件加载失败')
     } finally {
-      sourceFileLoading.value = false
+      if (requestToken === sourceFileRequestToken) {
+        sourceFileLoading.value = false
+      }
     }
   }
 

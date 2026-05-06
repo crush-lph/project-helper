@@ -36,6 +36,14 @@ function jsonResponse(data, ok = true) {
   }
 }
 
+function deferred() {
+  let resolve
+  const promise = new Promise((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 function mountComposable() {
   let workspace
   mount({
@@ -86,5 +94,51 @@ describe('useProjectHelper', () => {
     expect(workspace.activeProject.value.id).toBe('B')
     expect(workspace.activeProject.value.report).toBe('Report B')
     expect(globalThis.fetch).not.toHaveBeenCalledWith('http://127.0.0.1:8000/api/projects/A')
+  })
+
+  it('ignores source tree responses after the active project changes', async () => {
+    const treeResponse = deferred()
+    globalThis.fetch = vi.fn(async (url) => {
+      const target = String(url)
+      if (target.endsWith('/api/projects/A/source/tree')) {
+        return treeResponse.promise
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+
+    const loading = workspace.fetchSourceTree('A')
+    workspace.activeProject.value = { id: 'B', repo_url: 'repo-b', status: 'ready' }
+    treeResponse.resolve(jsonResponse({ tree: [{ type: 'file', name: 'a.py', path: 'a.py', size: 1 }] }))
+    await loading
+
+    expect(workspace.sourceTree.value).toEqual([])
+  })
+
+  it('ignores source file responses after the active project changes', async () => {
+    const fileResponse = deferred()
+    globalThis.fetch = vi.fn(async (url) => {
+      const target = String(url)
+      if (target.endsWith('/api/projects/A/source/file?path=a.py')) {
+        return fileResponse.promise
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+
+    const loading = workspace.loadSourceFile('a.py')
+    workspace.activeProject.value = { id: 'B', repo_url: 'repo-b', status: 'ready' }
+    fileResponse.resolve(jsonResponse({ path: 'a.py', content: 'from A', size: 6, truncated: false }))
+    await loading
+
+    expect(workspace.sourceFile.value).toBeNull()
   })
 })
