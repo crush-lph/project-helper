@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
@@ -12,6 +12,7 @@ from .analyzer import analyze_project_stream, chat_stream
 from .config import get_settings
 from .database import Database
 from .repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
+from .source_scan import SourceBrowseError, build_source_tree, read_source_file
 
 
 settings = get_settings()
@@ -77,6 +78,33 @@ def get_project(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
+
+
+def get_ready_project(project_id: str) -> dict:
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if project["status"] != "ready":
+        raise HTTPException(status_code=409, detail="项目尚未完成分析，暂不能查看源码。")
+    local_path = Path(project["local_path"])
+    if not local_path.exists() or not local_path.is_dir():
+        raise HTTPException(status_code=404, detail="本地源码目录不存在，请重新分析项目。")
+    return project
+
+
+@app.get("/api/projects/{project_id}/source/tree")
+def get_source_tree(project_id: str):
+    project = get_ready_project(project_id)
+    return {"tree": build_source_tree(Path(project["local_path"]))}
+
+
+@app.get("/api/projects/{project_id}/source/file")
+def get_source_file(project_id: str, path: str = Query(..., min_length=1)):
+    project = get_ready_project(project_id)
+    try:
+        return read_source_file(Path(project["local_path"]), path)
+    except SourceBrowseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.patch("/api/projects/{project_id}/pin")

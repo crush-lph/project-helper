@@ -25,8 +25,44 @@ CONFIG_FILES = {
 }
 
 
+class SourceBrowseError(ValueError):
+    pass
+
+
 def is_text_file(path: Path) -> bool:
     return path.name in CONFIG_FILES or path.suffix in TEXT_SUFFIXES
+
+
+def is_within_root(path: Path, root: Path) -> bool:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
+def safe_source_path(root: Path, relative_path: str) -> Path:
+    value = (relative_path or "").strip().lstrip("/")
+    if not value or value == ".":
+        raise SourceBrowseError("请选择要查看的源码文件。")
+    candidate = root / value
+    if has_symlink_component(root, candidate):
+        raise SourceBrowseError("拒绝读取符号链接文件。")
+    target = candidate.resolve()
+    if not is_within_root(target, root):
+        raise SourceBrowseError("拒绝读取仓库之外的文件。")
+    return target
+
+
+def has_symlink_component(root: Path, path: Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def iter_source_files(root: Path, limit: int = 900) -> list[Path]:
@@ -47,6 +83,72 @@ def read_text(path: Path, max_chars: int = 16_000) -> str:
         return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
     except OSError as exc:
         return f"读取失败：{exc}"
+
+
+def build_source_tree(root: Path, max_entries: int = 900) -> list[dict[str, Any]]:
+    root = root.resolve()
+    count = 0
+
+    def walk_dir(directory: Path) -> list[dict[str, Any]]:
+        nonlocal count
+        if count >= max_entries:
+            return []
+        entries: list[dict[str, Any]] = []
+        try:
+            children = sorted(directory.iterdir(), key=lambda item: (item.is_file(), item.name.lower()))
+        except OSError:
+            return entries
+
+        for child in children:
+            if count >= max_entries:
+                break
+            if child.is_symlink():
+                continue
+            if not is_within_root(child, root):
+                continue
+            if child.is_dir():
+                if child.name in IGNORE_DIRS or child.name.startswith(".cache"):
+                    continue
+                nested = walk_dir(child)
+                if nested:
+                    count += 1
+                    rel = child.relative_to(root).as_posix()
+                    entries.append({"type": "directory", "name": child.name, "path": rel, "children": nested})
+                continue
+            if not child.is_file() or not is_text_file(child):
+                continue
+            try:
+                size = child.stat().st_size
+            except OSError:
+                continue
+            if size > 350_000:
+                continue
+            count += 1
+            rel = child.relative_to(root).as_posix()
+            entries.append({"type": "file", "name": child.name, "path": rel, "size": size})
+        return entries
+
+    return walk_dir(root)
+
+
+def read_source_file(root: Path, relative_path: str, max_chars: int = 120_000) -> dict[str, Any]:
+    target = safe_source_path(root, relative_path)
+    if not target.exists() or not target.is_file():
+        raise SourceBrowseError("文件不存在。")
+    if not is_text_file(target):
+        raise SourceBrowseError("只能查看文本源码文件。")
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        raise SourceBrowseError(f"读取失败：{exc}") from exc
+    if size > 350_000:
+        raise SourceBrowseError("文件过大，暂不支持直接预览。")
+    return {
+        "path": target.relative_to(root.resolve()).as_posix(),
+        "content": read_text(target, max_chars=max_chars),
+        "size": size,
+        "truncated": size > max_chars,
+    }
 
 
 def build_tree(root: Path, max_entries: int = 220) -> str:

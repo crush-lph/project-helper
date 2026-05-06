@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, AsyncGenerator
+
+import anyio
 
 from .config import Settings
 from .database import Database
@@ -88,37 +93,66 @@ def sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def analyze_project_stream(db: Database, settings: Settings, project: dict[str, Any]) -> AsyncGenerator[str, None]:
-    if project["status"] == "ready" and project.get("report"):
-        yield sse("cached", {"message": "命中缓存，直接返回上次分析结果。", "project_id": project["id"]})
-        yield sse("done", {"project_id": project["id"]})
-        return
+_analysis_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    project_id = project["id"]
-    root = Path(project["local_path"])
-    try:
-        db.update_status(project_id, "cloning")
-        yield sse("progress", {"step": "clone", "message": "正在克隆或更新仓库..."})
-        clone_or_update(project["repo_url"], root)
 
-        db.update_status(project_id, "scanning")
-        yield sse("progress", {"step": "scan", "message": "正在扫描目录、技术栈和核心文件..."})
-        summary = scan_repository(root)
+async def iter_agent_stream(agent, question: str) -> AsyncGenerator[dict[str, Any], None]:
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
-        db.update_status(project_id, "summarizing")
-        yield sse("progress", {"step": "summarize", "message": "正在生成通俗版源码报告..."})
-        report = generate_llm_report(settings, project["repo_url"], summary)
-        if report is None:
-            report = local_report(project["repo_url"], summary)
-            summary["llm"] = "DEEPSEEK_API_KEY 未配置，已使用本地静态分析生成报告。"
+    def run_agent() -> None:
+        try:
+            for step in agent.stream({"input": question}):
+                loop.call_soon_threadsafe(queue.put_nowait, ("step", step))
+        except Exception as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+    threading.Thread(target=run_agent, daemon=True).start()
+    while True:
+        kind, payload = await queue.get()
+        if kind == "step":
+            yield payload
+        elif kind == "error":
+            raise payload
         else:
-            summary["llm"] = f"DeepSeek model: {settings.deepseek_model}"
+            return
 
-        db.save_analysis(project_id, report, summary)
-        yield sse("done", {"project_id": project_id})
-    except Exception as exc:
-        db.update_status(project_id, "failed")
-        yield sse("failed", {"message": str(exc)})
+
+async def analyze_project_stream(db: Database, settings: Settings, project: dict[str, Any]) -> AsyncGenerator[str, None]:
+    project_id = project["id"]
+    async with _analysis_locks[project_id]:
+        current_project = db.get_project(project_id) or project
+        if current_project["status"] == "ready" and current_project.get("report"):
+            yield sse("cached", {"message": "命中缓存，直接返回上次分析结果。", "project_id": project_id})
+            yield sse("done", {"project_id": project_id})
+            return
+
+        root = Path(current_project["local_path"])
+        try:
+            db.update_status(project_id, "cloning")
+            yield sse("progress", {"step": "clone", "message": "正在克隆或更新仓库..."})
+            await anyio.to_thread.run_sync(clone_or_update, current_project["repo_url"], root)
+
+            db.update_status(project_id, "scanning")
+            yield sse("progress", {"step": "scan", "message": "正在扫描目录、技术栈和核心文件..."})
+            summary = await anyio.to_thread.run_sync(scan_repository, root)
+
+            db.update_status(project_id, "summarizing")
+            yield sse("progress", {"step": "summarize", "message": "正在生成通俗版源码报告..."})
+            report = await anyio.to_thread.run_sync(generate_llm_report, settings, current_project["repo_url"], summary)
+            if report is None:
+                report = local_report(current_project["repo_url"], summary)
+                summary["llm"] = "DEEPSEEK_API_KEY 未配置，已使用本地静态分析生成报告。"
+            else:
+                summary["llm"] = f"DeepSeek model: {settings.deepseek_model}"
+
+            db.save_analysis(project_id, report, summary)
+            yield sse("done", {"project_id": project_id})
+        except Exception as exc:
+            db.update_status(project_id, "failed")
+            yield sse("failed", {"message": str(exc)})
 
 
 async def chat_stream(settings: Settings, project: dict[str, Any], question: str) -> AsyncGenerator[str, None]:
@@ -128,7 +162,7 @@ async def chat_stream(settings: Settings, project: dict[str, Any], question: str
         yield sse("token", {"text": "当前未配置 DEEPSEEK_API_KEY，我先用本地搜索给你一个可验证答案。\n\n"})
         keywords = [part for part in question.replace("，", " ").replace("？", " ").split() if len(part) >= 2]
         query = keywords[0] if keywords else question[:20]
-        hits = search_code(root, query, limit=12)
+        hits = await anyio.to_thread.run_sync(lambda: search_code(root, query, limit=12))
         answer = f"我搜索了关键词 `{query}`，找到这些线索：\n\n```text\n{hits}\n```\n\n建议你继续追问一个更具体的问题，例如“解释第一个文件的作用”或“沿着这个函数追调用链”。"
         for chunk in answer.splitlines(keepends=True):
             yield sse("token", {"text": chunk})
@@ -136,7 +170,7 @@ async def chat_stream(settings: Settings, project: dict[str, Any], question: str
         return
 
     try:
-        for step in agent.stream({"input": question}):
+        async for step in iter_agent_stream(agent, question):
             text = ""
             if "actions" in step:
                 action_names = ", ".join(action.tool for action in step["actions"])

@@ -64,6 +64,20 @@ def test_project_create_analyze_cache_and_chat_flow(monkeypatch, tmp_path):
     assert "project-helper 源码分析报告" in loaded.json()["report"]
     assert loaded.json()["summary"]["stack"] == ["FastAPI", "Python"]
 
+    source_tree = client.get(f"/api/projects/{project['id']}/source/tree")
+    assert source_tree.status_code == 200
+    assert source_tree.json()["tree"][0]["path"] == "app"
+    assert source_tree.json()["tree"][0]["children"][0]["path"] == "app/main.py"
+
+    source_file = client.get(f"/api/projects/{project['id']}/source/file", params={"path": "app/main.py"})
+    assert source_file.status_code == 200
+    assert source_file.json()["path"] == "app/main.py"
+    assert "def health" in source_file.json()["content"]
+
+    traversal = client.get(f"/api/projects/{project['id']}/source/file", params={"path": "../secrets.py"})
+    assert traversal.status_code == 400
+    assert "仓库之外" in traversal.json()["detail"]
+
     cached_stream = client.get(f"/api/projects/{project['id']}/analyze/stream")
     cached_events = parse_sse_events(cached_stream.text)
     assert [name for name, _ in cached_events] == ["cached", "done"]
@@ -96,6 +110,9 @@ def test_api_rejects_invalid_project_and_empty_chat(monkeypatch, tmp_path):
 
     created = client.post("/api/projects", json={"repo_url": "https://github.com/owner/repo"})
     project_id = created.json()["id"]
+
+    source_before_ready = client.get(f"/api/projects/{project_id}/source/tree")
+    assert source_before_ready.status_code == 409
 
     empty_chat = client.post(f"/api/projects/{project_id}/chat/stream", json={"question": "   "})
     assert empty_chat.status_code == 400

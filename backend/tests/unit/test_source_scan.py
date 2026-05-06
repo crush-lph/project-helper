@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from app.source_scan import build_tree, scan_repository, search_code
+import pytest
+
+from app.source_scan import SourceBrowseError, build_source_tree, build_tree, read_source_file, scan_repository, search_code
 
 
 def write(path: Path, text: str) -> None:
@@ -43,3 +45,63 @@ def test_build_tree_limits_depth_and_entries(tmp_path):
 
     assert "root.py" in tree
     assert "deep.py" not in tree
+
+
+def test_build_source_tree_lists_text_files_and_ignores_generated_dirs(tmp_path):
+    write(tmp_path / "README.md", "# Demo\n")
+    write(tmp_path / "app" / "main.py", "def health():\n    return True\n")
+    write(tmp_path / "node_modules" / "ignored.js", "console.log('hidden')\n")
+    write(tmp_path / "image.png", "not really an image\n")
+
+    tree = build_source_tree(tmp_path)
+
+    assert tree[0]["path"] == "app"
+    assert tree[0]["children"][0]["path"] == "app/main.py"
+    assert any(item["path"] == "README.md" for item in tree)
+    assert all(item["path"] != "node_modules" for item in tree)
+    assert all(item["path"] != "image.png" for item in tree)
+
+
+def test_build_source_tree_skips_symlinks(tmp_path):
+    write(tmp_path / "app" / "main.py", "def health():\n    return True\n")
+    write(tmp_path / "linked.py", "print('target')\n")
+    (tmp_path / "loop").symlink_to(tmp_path, target_is_directory=True)
+    (tmp_path / "app" / "linked.py").symlink_to(tmp_path / "linked.py")
+
+    tree = build_source_tree(tmp_path)
+    paths = {item["path"] for item in tree}
+    app = next(item for item in tree if item["path"] == "app")
+    child_paths = {item["path"] for item in app["children"]}
+
+    assert "loop" not in paths
+    assert "app/linked.py" not in child_paths
+    assert "app/main.py" in child_paths
+
+
+def test_read_source_file_rejects_paths_outside_repo(tmp_path):
+    root = tmp_path / "repo"
+    sibling = tmp_path / "repo-secret"
+    write(root / "README.md", "# Safe\n")
+    write(sibling / "secret.py", "token = 'hidden'\n")
+
+    with pytest.raises(SourceBrowseError, match="仓库之外"):
+        read_source_file(root, "../repo-secret/secret.py")
+
+
+def test_read_source_file_rejects_symlink_paths(tmp_path):
+    write(tmp_path / "safe.py", "print('safe')\n")
+    (tmp_path / "linked.py").symlink_to(tmp_path / "safe.py")
+
+    with pytest.raises(SourceBrowseError, match="符号链接"):
+        read_source_file(tmp_path, "linked.py")
+
+
+def test_read_source_file_returns_content_metadata(tmp_path):
+    write(tmp_path / "app" / "main.py", "def health():\n    return True\n")
+
+    result = read_source_file(tmp_path, "app/main.py")
+
+    assert result["path"] == "app/main.py"
+    assert "def health" in result["content"]
+    assert result["size"] > 0
+    assert result["truncated"] is False

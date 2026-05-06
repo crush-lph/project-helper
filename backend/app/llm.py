@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from langchain.tools import tool
@@ -46,6 +47,18 @@ def generate_llm_report(settings: Settings, repo_url: str, summary: dict[str, An
     return str(response.content)
 
 
+def read_repo_file(root_path: str, path: str, max_chars: int = 24_000) -> str:
+    root = Path(root_path).resolve()
+    target = (root / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return "拒绝读取仓库之外的文件。"
+    if not target.exists() or not target.is_file():
+        return "文件不存在。"
+    return read_text(target, max_chars=max_chars)
+
+
 def create_code_agent(settings: Settings, root_path: str):
     llm = get_llm(settings, streaming=True)
     if llm is None:
@@ -59,7 +72,6 @@ def create_code_agent(settings: Settings, root_path: str):
     @tool
     def list_tree() -> str:
         """List the repository directory tree that has already been summarized."""
-        from pathlib import Path
         from .source_scan import build_tree
 
         return build_tree(Path(root_path), max_entries=260)
@@ -67,20 +79,11 @@ def create_code_agent(settings: Settings, root_path: str):
     @tool
     def read_file(path: str) -> str:
         """Read a source file by repository-relative path."""
-        from pathlib import Path
-
-        root = Path(root_path).resolve()
-        target = (root / path).resolve()
-        if not str(target).startswith(str(root)):
-            return "拒绝读取仓库之外的文件。"
-        if not target.exists() or not target.is_file():
-            return "文件不存在。"
-        return read_text(target, max_chars=24_000)
+        return read_repo_file(root_path, path)
 
     @tool
     def search_repo(query: str) -> str:
         """Search source files for a keyword and return file:line snippets."""
-        from pathlib import Path
 
         return search_code(Path(root_path), query, limit=30)
 

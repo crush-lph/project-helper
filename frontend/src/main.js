@@ -7,9 +7,13 @@ import {
   BookOpen,
   Bot,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Code2,
   Database,
+  FileText,
   FolderGit2,
+  FolderOpen,
   Loader2,
   MessageSquareText,
   Pin,
@@ -65,9 +69,13 @@ app.config.globalProperties.$marked = marked
 app.component('BookOpen', BookOpen)
 app.component('Bot', Bot)
 app.component('CheckCircle2', CheckCircle2)
+app.component('ChevronDown', ChevronDown)
+app.component('ChevronRight', ChevronRight)
 app.component('Code2', Code2)
 app.component('Database', Database)
+app.component('FileText', FileText)
 app.component('FolderGit2', FolderGit2)
+app.component('FolderOpen', FolderOpen)
 app.component('Loader2', Loader2)
 app.component('MessageSquareText', MessageSquareText)
 app.component('Pin', Pin)
