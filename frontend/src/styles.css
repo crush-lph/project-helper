@@ -790,17 +790,71 @@ input:focus {
   min-height: 0;
   margin: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 12px 0;
   color: #dbeafe;
   background: #020617;
   font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   line-height: 1.75;
-  white-space: pre;
 }
 
-.source-code code {
-  color: inherit;
+.code-line {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 12px 0 0;
+}
+
+.code-line:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.fold-gutter {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  user-select: none;
+  cursor: default;
+}
+
+.fold-gutter[role="button"] {
+  cursor: pointer;
+  color: #64748b;
+}
+
+.fold-gutter[role="button"]:hover {
+  color: #94a3b8;
+}
+
+.line-number {
+  width: 48px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 14px;
+  color: #334155;
+  user-select: none;
+}
+
+.line-content {
+  flex: 1;
+  white-space: pre;
+  min-width: 0;
+}
+
+.code-line.fold-start + .code-line:not(.fold-start) {
+  /* first hidden line after fold start gets a subtle top indicator when folded */
+}
+
+.code-line.folded-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #475569;
+  font-style: italic;
+  font-size: 11px;
+  padding-left: 4px;
 }
 
 .source-code .hljs-keyword,

@@ -15,8 +15,50 @@ const props = defineProps({
 const emit = defineEmits(['load-file', 'refresh'])
 const collapsedDirs = ref(new Set())
 const sourceRows = computed(() => flattenSourceTree(props.tree))
-const highlightedSource = computed(() => highlightSource(props.file?.content || '', props.file?.path || ''))
 
+// ---- Code Folding State ----
+const foldedLines = ref(new Set())
+
+const codeLines = computed(() => {
+  const content = props.file?.content || ''
+  const path = props.file?.path || ''
+  if (!content) return []
+  const highlighted = highlightSource(content, path)
+  return splitHighlightedHtml(highlighted)
+})
+
+const foldRegions = computed(() => {
+  const content = props.file?.content || ''
+  const path = props.file?.path || ''
+  if (!content) return []
+  const lang = languageFromPath(path)
+  return detectFoldRegions(content, lang)
+})
+
+const foldStartSet = computed(() => new Set(foldRegions.value.map(r => r.startLine)))
+
+// Reset fold state when file changes
+watch(
+  () => props.file?.path,
+  () => { foldedLines.value = new Set() },
+)
+
+function toggleFold(lineIndex) {
+  const next = new Set(foldedLines.value)
+  if (next.has(lineIndex)) next.delete(lineIndex)
+  else next.add(lineIndex)
+  foldedLines.value = next
+}
+
+function isLineHidden(lineIndex) {
+  for (const start of foldedLines.value) {
+    const region = foldRegions.value.find(r => r.startLine === start)
+    if (region && lineIndex > region.startLine && lineIndex <= region.endLine) return true
+  }
+  return false
+}
+
+// ---- Directory Tree ----
 watch(
   () => props.tree,
   () => {
@@ -52,6 +94,7 @@ function handleRowClick(item) {
   emit('load-file', item.path)
 }
 
+// ---- Syntax Highlighting ----
 function highlightSource(content, path) {
   const language = languageFromPath(path)
   const highlighted = language
@@ -81,6 +124,131 @@ function languageFromPath(path) {
   }
   const language = languages[extension]
   return language && hljs.getLanguage(language) ? language : ''
+}
+
+// ---- Tag-Aware Line Splitting ----
+// highlight.js may produce <span> tags that cross line boundaries.
+// This splitter closes open tags at end of each line and re-opens them at start of next.
+function splitHighlightedHtml(html) {
+  const rawLines = html.split('\n')
+  const result = []
+  const openTags = [] // stack of "<span class='...'>" strings
+
+  for (const rawLine of rawLines) {
+    let line = ''
+
+    // Re-open any tags that were open from previous lines
+    for (const tag of openTags) {
+      line += tag
+    }
+
+    // Process the raw line character by character (token-level)
+    let i = 0
+    while (i < rawLine.length) {
+      // Check for opening tag
+      if (rawLine[i] === '<' && rawLine[i + 1] === 's') {
+        const closeIdx = rawLine.indexOf('>', i)
+        if (closeIdx !== -1) {
+          const tag = rawLine.substring(i, closeIdx + 1)
+          openTags.push(tag)
+          line += tag
+          i = closeIdx + 1
+          continue
+        }
+      }
+      // Check for closing tag
+      if (rawLine[i] === '<' && rawLine[i + 1] === '/' && rawLine[i + 2] === 's') {
+        const closeIdx = rawLine.indexOf('>', i)
+        if (closeIdx !== -1) {
+          openTags.pop()
+          line += rawLine.substring(i, closeIdx + 1)
+          i = closeIdx + 1
+          continue
+        }
+      }
+      line += rawLine[i]
+      i++
+    }
+
+    // Close all open tags at end of line
+    for (let j = openTags.length - 1; j >= 0; j--) {
+      line += '</span>'
+    }
+
+    result.push(line)
+  }
+
+  return result
+}
+
+// ---- Fold Region Detection ----
+function detectFoldRegions(code, language) {
+  const lines = code.split('\n')
+  const indentLangs = new Set(['python', 'yaml'])
+  if (indentLangs.has(language)) {
+    return detectIndentFolds(lines)
+  }
+  return detectBraceFolds(lines)
+}
+
+// Indentation-based folding (Python, YAML)
+function detectIndentFolds(lines) {
+  const regions = []
+  const stack = [] // { indent, lineIndex }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '') continue
+    const indent = line.search(/\S/)
+
+    // Pop stack entries with >= indent (those blocks have ended)
+    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+      const entry = stack.pop()
+      entry.endLine = i - 1
+      if (entry.endLine > entry.startLine) {
+        regions.push({ startLine: entry.startLine, endLine: entry.endLine })
+      }
+    }
+
+    stack.push({ indent, startLine: i })
+  }
+
+  // Close remaining entries
+  while (stack.length > 0) {
+    const entry = stack.pop()
+    entry.endLine = lines.length - 1
+    if (entry.endLine > entry.startLine) {
+      regions.push({ startLine: entry.startLine, endLine: entry.endLine })
+    }
+  }
+
+  return regions
+}
+
+// Brace-based folding (JS, TS, JSON, CSS, etc.)
+function detectBraceFolds(lines) {
+  const regions = []
+  const stack = [] // line index of the opening brace's line
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Skip lines that are only whitespace or comments
+    const stripped = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
+
+    for (let j = 0; j < stripped.length; j++) {
+      const ch = stripped[j]
+      if (ch === '{') {
+        stack.push(i)
+      } else if (ch === '}') {
+        const startLine = stack.pop()
+        if (startLine !== undefined && i > startLine) {
+          regions.push({ startLine, endLine: i })
+        }
+      }
+    }
+  }
+
+  return regions
 }
 </script>
 
@@ -132,7 +300,28 @@ function languageFromPath(path) {
             <small>{{ file.size }} bytes{{ file.truncated ? ' · 已截断' : '' }}</small>
           </span>
         </div>
-        <pre v-if="file" class="source-code"><code v-html="highlightedSource"></code></pre>
+        <div v-if="file" class="source-code" role="code-viewer">
+          <div
+            v-for="(lineHtml, i) in codeLines"
+            :key="i"
+            v-show="!isLineHidden(i)"
+            :class="['code-line', { 'fold-start': foldStartSet.has(i), 'folded': foldedLines.has(i) }]"
+          >
+            <span
+              v-if="foldStartSet.has(i)"
+              class="fold-gutter"
+              role="button"
+              :aria-label="foldedLines.has(i) ? '展开' : '折叠'"
+              @click.stop="toggleFold(i)"
+            >
+              <ChevronRight v-if="foldedLines.has(i)" :size="12" />
+              <ChevronDown v-else :size="12" />
+            </span>
+            <span v-else class="fold-gutter" />
+            <span class="line-number">{{ i + 1 }}</span>
+            <span class="line-content" v-html="lineHtml" />
+          </div>
+        </div>
         <div v-else class="source-placeholder">
           <Search :size="34" />
           <span>{{ fileLoading ? '正在读取文件...' : '选择一个文件查看源码' }}</span>
