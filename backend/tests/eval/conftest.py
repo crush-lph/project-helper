@@ -10,7 +10,7 @@ from app.config import Settings
 
 @pytest.fixture()
 def eval_settings(tmp_path: Path) -> Settings:
-    return Settings(deepseek_api_key="", PROJECT_HELPER_DATA_DIR=tmp_path / "data")
+    return Settings(deepseek_api_key="", data_dir=tmp_path / "data")
 
 
 @pytest.fixture()

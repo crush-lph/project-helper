@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleStop,
   Activity,
   DatabaseZap,
   Code2,
@@ -24,6 +25,7 @@ import {
   GitBranch,
   GitPullRequestArrow,
   Loader2,
+  MessageSquarePlus,
   MessageSquareText,
   Pin,
   PinOff,
@@ -35,6 +37,7 @@ import {
   Sparkles,
   TerminalSquare,
   Trash2,
+  User,
   Zap,
 } from 'lucide-vue-next'
 import './styles.css'
@@ -86,6 +89,7 @@ app.component('Blocks', Blocks)
 app.component('CheckCircle2', CheckCircle2)
 app.component('ChevronDown', ChevronDown)
 app.component('ChevronRight', ChevronRight)
+app.component('CircleStop', CircleStop)
 app.component('Activity', Activity)
 app.component('DatabaseZap', DatabaseZap)
 app.component('Code2', Code2)
@@ -99,6 +103,7 @@ app.component('FolderOpen', FolderOpen)
 app.component('GitBranch', GitBranch)
 app.component('GitPullRequestArrow', GitPullRequestArrow)
 app.component('Loader2', Loader2)
+app.component('MessageSquarePlus', MessageSquarePlus)
 app.component('MessageSquareText', MessageSquareText)
 app.component('Pin', Pin)
 app.component('PinOff', PinOff)
@@ -110,5 +115,6 @@ app.component('ScanSearch', ScanSearch)
 app.component('Sparkles', Sparkles)
 app.component('TerminalSquare', TerminalSquare)
 app.component('Trash2', Trash2)
+app.component('User', User)
 app.component('Zap', Zap)
 app.mount('#app')

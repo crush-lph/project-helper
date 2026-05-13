@@ -48,17 +48,21 @@ class Settings(BaseSettings):
     """
 
     # LLM 相关配置
-    deepseek_api_key: str = ""                                    # API 密钥，为空表示不使用 LLM
-    deepseek_base_url: str = "https://api.deepseek.com"          # API 基础地址
-    deepseek_model: str = "deepseek-chat"                        # 模型名称
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
 
-    # 存储配置 —— alias 允许环境变量用不同的名字
-    data_dir: Path = Field(default=Path(".project-helper-data"), alias="PROJECT_HELPER_DATA_DIR")
-    allowed_hosts: str = Field(default="github.com,www.github.com", alias="PROJECT_HELPER_ALLOWED_HOSTS")
+    # 存储配置
+    data_dir: Path = Path(".project-helper-data")
+    allowed_hosts: str = "github.com,www.github.com"
 
     # LLM 调用配置 —— 超时和重试
-    llm_timeout: int = Field(default=90, alias="LLM_TIMEOUT")         # 单次 LLM 请求超时秒数
-    llm_max_retries: int = Field(default=3, alias="LLM_MAX_RETRIES")  # LLM 请求失败重试次数
+    llm_timeout: int = Field(default=90, ge=5, le=300)
+    llm_max_retries: int = Field(default=3, ge=0, le=10)
+
+    # Agent 配置
+    agent_max_iterations: int = Field(default=8, ge=1, le=50)
+    agent_max_execution_time: int = Field(default=60, ge=10, le=300)
 
     # model_config 告诉 Pydantic 如何读取配置
     model_config = SettingsConfigDict(

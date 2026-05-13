@@ -10,20 +10,24 @@
 - [ ] 未配置 `DEEPSEEK_API_KEY` 时可以生成本地静态分析报告。
 - [ ] 已完成分析的项目再次分析时走缓存，不重复克隆和扫描。
 - [ ] 问答接口拒绝空问题；无 LLM key 时使用本地搜索 fallback。
-- [ ] 前端可以创建任务、展示 SSE 进度、渲染报告，并在 ready 后启用问答。
+- [ ] 源码浏览只能读取仓库内文本文件，越界路径、符号链接和非文本文件会被拒绝。
+- [ ] 源码批注按项目和文件隔离；可创建、编辑、删除，并且不会修改克隆仓库里的源码。
+- [ ] 前端可以创建任务、展示 SSE 进度、渲染报告，并在 ready 后启用源码浏览、批注和问答。
 
 ## 必跑命令
 
 ```bash
 cd backend
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 pytest
 ```
 
 ```bash
 cd frontend
 npm install
+npm test
+npm run test:e2e
 npm run build
 ```
 
@@ -31,6 +35,7 @@ npm run build
 
 - [ ] 新增或修改关键函数时，同步补充 unit test。
 - [ ] 修改 API 行为、状态流转、缓存逻辑或 fallback 行为时，同步补充 E2E test。
+- [ ] 修改源码浏览、源码批注、报告或问答 UI 时，同步补充前端组件测试和 Playwright E2E。
 - [ ] 测试不依赖真实 GitHub 克隆、真实 LLM 调用或本机已有缓存。
 - [ ] 错误信息仍然对中文用户可读。
 - [ ] 不提交 `.env`、`.project-helper-data/`、`node_modules/`、`dist/` 或测试缓存。

@@ -25,6 +25,7 @@ export function useProjectHelper() {
   const error = ref('')
   const question = ref('这个项目的启动流程是什么？')
   const chatMessages = ref([])
+  const referencedFiles = ref([])
   const asking = ref(false)
   const busyProjectId = ref('')
   const sourceTree = ref([])
@@ -32,11 +33,20 @@ export function useProjectHelper() {
   const sourceLoading = ref(false)
   const sourceFileLoading = ref(false)
   const sourceError = ref('')
+  const sourceAnnotations = ref([])
+  const sourceAnnotationLoading = ref(false)
+  const sourceAnnotationSaving = ref(false)
+  const sourceAnnotationError = ref('')
   const activeView = ref('source')
   let activeAnalysisStream = null
   let analysisStreamToken = 0
+  let activeChatController = null
+  let activeChatAssistant = null
+  let chatStreamToken = 0
+  let chatAbortNoticeToken = 0
   let sourceTreeRequestToken = 0
   let sourceFileRequestToken = 0
+  let sourceAnnotationRequestToken = 0
 
   const isReady = computed(() => activeProject.value?.status === 'ready')
   const workspaceTabs = computed(() => [
@@ -92,11 +102,16 @@ export function useProjectHelper() {
   function resetSourceBrowser() {
     sourceTreeRequestToken += 1
     sourceFileRequestToken += 1
+    sourceAnnotationRequestToken += 1
     sourceTree.value = []
     sourceFile.value = null
+    sourceAnnotations.value = []
     sourceError.value = ''
+    sourceAnnotationError.value = ''
     sourceLoading.value = false
     sourceFileLoading.value = false
+    sourceAnnotationLoading.value = false
+    sourceAnnotationSaving.value = false
   }
 
   function closeAnalysisStream() {
@@ -105,6 +120,26 @@ export function useProjectHelper() {
       activeAnalysisStream.close()
       activeAnalysisStream = null
     }
+  }
+
+  function closeChatStream({ appendNotice = false } = {}) {
+    const stoppedToken = chatStreamToken
+    if (appendNotice) {
+      chatAbortNoticeToken = stoppedToken
+      appendChatAbortNotice(activeChatAssistant)
+    }
+    chatStreamToken += 1
+    if (activeChatController) {
+      activeChatController.abort()
+      activeChatController = null
+    }
+    activeChatAssistant = null
+    asking.value = false
+  }
+
+  function stopQuestion() {
+    if (!asking.value && !activeChatController) return
+    closeChatStream({ appendNotice: true })
   }
 
   function selectView(view) {
@@ -128,6 +163,7 @@ export function useProjectHelper() {
       sourceTree.value = data.tree || []
       if (!hasSourcePath(sourceTree.value, sourceFile.value?.path)) {
         sourceFile.value = null
+        sourceAnnotations.value = []
       }
       if (sourceTree.value.length && activeView.value !== 'chat') {
         activeView.value = 'source'
@@ -156,6 +192,7 @@ export function useProjectHelper() {
       const data = await response.json()
       if (requestToken !== sourceFileRequestToken || activeProject.value?.id !== projectId) return
       sourceFile.value = data
+      await fetchSourceAnnotations(data.path, projectId)
     } catch (err) {
       if (requestToken !== sourceFileRequestToken || activeProject.value?.id !== projectId) return
       sourceError.value = errorMessage(err, '源码文件加载失败')
@@ -163,6 +200,101 @@ export function useProjectHelper() {
       if (requestToken === sourceFileRequestToken) {
         sourceFileLoading.value = false
       }
+    }
+  }
+
+  async function fetchSourceAnnotations(path = sourceFile.value?.path, projectId = activeProject.value?.id) {
+    if (!projectId || !path) {
+      sourceAnnotations.value = []
+      return
+    }
+    const requestToken = ++sourceAnnotationRequestToken
+    sourceAnnotationLoading.value = true
+    sourceAnnotationError.value = ''
+    try {
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations?path=${encodeURIComponent(path)}`)
+      if (!response.ok) {
+        throw new Error(await responseDetail(response, '源码批注加载失败'))
+      }
+      const data = await response.json()
+      if (requestToken !== sourceAnnotationRequestToken || activeProject.value?.id !== projectId || sourceFile.value?.path !== path) return
+      sourceAnnotations.value = data.annotations || []
+    } catch (err) {
+      if (requestToken !== sourceAnnotationRequestToken || activeProject.value?.id !== projectId || sourceFile.value?.path !== path) return
+      sourceAnnotationError.value = errorMessage(err, '源码批注加载失败')
+    } finally {
+      if (requestToken === sourceAnnotationRequestToken) {
+        sourceAnnotationLoading.value = false
+      }
+    }
+  }
+
+  async function createSourceAnnotation({ path = sourceFile.value?.path, line = null, body }) {
+    const projectId = activeProject.value?.id
+    if (!projectId || !path || !body?.trim() || sourceAnnotationSaving.value) return
+    sourceAnnotationSaving.value = true
+    sourceAnnotationError.value = ''
+    try {
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, line, body }),
+      })
+      if (!response.ok) {
+        throw new Error(await responseDetail(response, '源码批注保存失败'))
+      }
+      const annotation = await response.json()
+      if (activeProject.value?.id !== projectId || sourceFile.value?.path !== annotation.path) return
+      sourceAnnotations.value = sortAnnotations([...sourceAnnotations.value, annotation])
+    } catch (err) {
+      sourceAnnotationError.value = errorMessage(err, '源码批注保存失败')
+    } finally {
+      sourceAnnotationSaving.value = false
+    }
+  }
+
+  async function updateSourceAnnotation(annotation, body) {
+    const projectId = activeProject.value?.id
+    if (!projectId || !annotation?.id || !body?.trim() || sourceAnnotationSaving.value) return
+    sourceAnnotationSaving.value = true
+    sourceAnnotationError.value = ''
+    try {
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations/${annotation.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      })
+      if (!response.ok) {
+        throw new Error(await responseDetail(response, '源码批注更新失败'))
+      }
+      const updated = await response.json()
+      if (activeProject.value?.id !== projectId || sourceFile.value?.path !== updated.path) return
+      sourceAnnotations.value = sortAnnotations(sourceAnnotations.value.map((item) => (item.id === updated.id ? updated : item)))
+    } catch (err) {
+      sourceAnnotationError.value = errorMessage(err, '源码批注更新失败')
+    } finally {
+      sourceAnnotationSaving.value = false
+    }
+  }
+
+  async function deleteSourceAnnotation(annotation) {
+    const projectId = activeProject.value?.id
+    if (!projectId || !annotation?.id || sourceAnnotationSaving.value) return
+    sourceAnnotationSaving.value = true
+    sourceAnnotationError.value = ''
+    try {
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations/${annotation.id}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        throw new Error(await responseDetail(response, '源码批注删除失败'))
+      }
+      if (activeProject.value?.id !== projectId) return
+      sourceAnnotations.value = sourceAnnotations.value.filter((item) => item.id !== annotation.id)
+    } catch (err) {
+      sourceAnnotationError.value = errorMessage(err, '源码批注删除失败')
+    } finally {
+      sourceAnnotationSaving.value = false
     }
   }
 
@@ -174,11 +306,13 @@ export function useProjectHelper() {
 
   async function createAndAnalyze() {
     closeAnalysisStream()
+    closeChatStream()
     loading.value = true
     error.value = ''
     resetSourceBrowser()
     progress.value = []
     chatMessages.value = []
+    referencedFiles.value = []
     try {
       const response = await fetch(`${API_BASE}/api/projects`, {
         method: 'POST',
@@ -263,17 +397,31 @@ export function useProjectHelper() {
 
   async function loadProject(project) {
     closeAnalysisStream()
+    closeChatStream()
     loading.value = false
     resetSourceBrowser()
     const response = await fetch(`${API_BASE}/api/projects/${project.id}`)
     activeProject.value = response.ok ? await response.json() : project
     repoUrl.value = activeProject.value.repo_url
     progress.value = [{ step: 'cache', message: '已加载缓存报告。' }]
-    chatMessages.value = []
+    referencedFiles.value = []
+    await loadChatMessages(activeProject.value.id)
     if (activeProject.value.status === 'ready') {
       await fetchSourceTree(activeProject.value.id)
     } else {
       activeView.value = 'report'
+    }
+  }
+
+  async function loadChatMessages(projectId) {
+    if (!projectId) { chatMessages.value = []; return }
+    try {
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/chat/messages`)
+      if (!response.ok) { chatMessages.value = []; return }
+      const data = await response.json()
+      chatMessages.value = (data.messages || []).map((m) => ({ role: m.role, text: m.text }))
+    } catch {
+      chatMessages.value = []
     }
   }
 
@@ -313,6 +461,7 @@ export function useProjectHelper() {
         throw new Error(detail.detail || '删除项目失败')
       }
       if (activeProject.value?.id === project.id) {
+        closeChatStream()
         activeProject.value = null
         progress.value = []
         chatMessages.value = []
@@ -348,21 +497,31 @@ export function useProjectHelper() {
   }
 
   async function askQuestion() {
-    if (!question.value.trim() || !activeProject.value) return
+    if (!question.value.trim() || !activeProject.value || asking.value) return
+    const projectId = activeProject.value.id
+    const controller = new AbortController()
+    const streamToken = ++chatStreamToken
     activeView.value = 'chat'
     asking.value = true
     error.value = ''
     const userText = question.value.trim()
-    chatMessages.value.push({ role: 'user', text: userText })
+    const files = [...referencedFiles.value]
+    referencedFiles.value = []
+    const history = chatMessages.value.map((m) => ({ role: m.role, text: m.text }))
+    chatMessages.value.push({ role: 'user', text: userText + (files.length ? ` [引用: ${files.join(', ')}]` : '') })
     const assistant = { role: 'assistant', text: '' }
     chatMessages.value.push(assistant)
+    activeChatController = controller
+    activeChatAssistant = assistant
 
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${activeProject.value.id}/chat/stream`, {
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: userText }),
+        signal: controller.signal,
+        body: JSON.stringify({ question: userText, file_paths: files, history }),
       })
+      if (streamToken !== chatStreamToken || activeProject.value?.id !== projectId) return
       if (!response.ok) {
         let detail = null
         try {
@@ -378,10 +537,21 @@ export function useProjectHelper() {
 
       await readChatStream(response.body, assistant)
     } catch (err) {
+      if (err?.name === 'AbortError') {
+        if (chatAbortNoticeToken === streamToken) {
+          appendChatAbortNotice(assistant)
+        }
+        return
+      }
+      if (streamToken !== chatStreamToken || activeProject.value?.id !== projectId) return
       const message = errorMessage(err, '问答请求失败，请稍后重试。')
       assistant.text += `${assistant.text ? '\n\n' : ''}${message}`
     } finally {
-      asking.value = false
+      if (streamToken === chatStreamToken) {
+        activeChatController = null
+        activeChatAssistant = null
+        asking.value = false
+      }
     }
   }
 
@@ -395,9 +565,12 @@ export function useProjectHelper() {
     busyProjectId,
     chatMessages,
     createAndAnalyze,
+    createSourceAnnotation,
+    deleteSourceAnnotation,
     deleteProject,
     error,
     fetchSourceTree,
+    fetchSourceAnnotations,
     isCachedRun,
     isReady,
     latestProgress,
@@ -410,16 +583,23 @@ export function useProjectHelper() {
     progressPercent,
     projects,
     question,
+    referencedFiles,
     repoUrl,
     selectView,
     sourceError,
+    sourceAnnotationError,
+    sourceAnnotationLoading,
+    sourceAnnotationSaving,
+    sourceAnnotations,
     sourceFile,
     sourceFileLoading,
     sourceLoading,
     sourceTree,
     statusLabel,
     stepState,
+    stopQuestion,
     togglePinned,
+    updateSourceAnnotation,
     workspaceTabs,
   }
 }
@@ -427,6 +607,22 @@ export function useProjectHelper() {
 function hasSourcePath(nodes, path) {
   if (!path) return false
   return nodes.some((node) => node.path === path || (node.children && hasSourcePath(node.children, path)))
+}
+
+export function sortAnnotations(annotations) {
+  return annotations.slice().sort((left, right) => {
+    const leftLine = left.line ?? 0
+    const rightLine = right.line ?? 0
+    if (leftLine !== rightLine) return leftLine - rightLine
+    return String(left.created_at || '').localeCompare(String(right.created_at || ''))
+  })
+}
+
+function appendChatAbortNotice(assistant) {
+  if (!assistant) return
+  const notice = '已中止回答。'
+  if (assistant.text.includes(notice)) return
+  assistant.text += `${assistant.text ? '\n\n' : ''}${notice}`
 }
 
 async function readChatStream(body, assistant) {

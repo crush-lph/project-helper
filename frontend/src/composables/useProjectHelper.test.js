@@ -141,4 +141,93 @@ describe('useProjectHelper', () => {
 
     expect(workspace.sourceFile.value).toBeNull()
   })
+
+  it('loads annotations for the active source file and ignores stale annotation responses', async () => {
+    const annotationResponse = deferred()
+    globalThis.fetch = vi.fn(async (url) => {
+      const target = String(url)
+      if (target.endsWith('/api/projects/A/source/annotations?path=a.py')) {
+        return annotationResponse.promise
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+    workspace.sourceFile.value = { path: 'a.py', content: 'from A', size: 6, truncated: false }
+
+    const loading = workspace.fetchSourceAnnotations('a.py', 'A')
+    workspace.sourceFile.value = { path: 'b.py', content: 'from B', size: 6, truncated: false }
+    annotationResponse.resolve(jsonResponse({ annotations: [{ id: 'note-1', path: 'a.py', line: 1, body: 'stale' }] }))
+    await loading
+
+    expect(workspace.sourceAnnotations.value).toEqual([])
+  })
+
+  it('creates, updates, and deletes source annotations in state', async () => {
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const target = String(url)
+      if (options.method === 'POST' && target.endsWith('/api/projects/A/source/annotations')) {
+        return jsonResponse({ id: 'note-1', project_id: 'A', path: 'a.py', line: 1, body: 'first', created_at: '1' })
+      }
+      if (options.method === 'PATCH' && target.endsWith('/api/projects/A/source/annotations/note-1')) {
+        return jsonResponse({ id: 'note-1', project_id: 'A', path: 'a.py', line: 1, body: 'updated', created_at: '1' })
+      }
+      if (options.method === 'DELETE' && target.endsWith('/api/projects/A/source/annotations/note-1')) {
+        return { ok: true }
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+    workspace.sourceFile.value = { path: 'a.py', content: 'from A', size: 6, truncated: false }
+
+    await workspace.createSourceAnnotation({ path: 'a.py', line: 1, body: 'first' })
+
+    expect(workspace.sourceAnnotations.value).toHaveLength(1)
+    expect(workspace.sourceAnnotations.value[0].body).toBe('first')
+
+    await workspace.updateSourceAnnotation(workspace.sourceAnnotations.value[0], 'updated')
+
+    expect(workspace.sourceAnnotations.value[0].body).toBe('updated')
+
+    await workspace.deleteSourceAnnotation(workspace.sourceAnnotations.value[0])
+
+    expect(workspace.sourceAnnotations.value).toEqual([])
+  })
+
+  it('aborts an in-flight chat stream when the user stops the answer', async () => {
+    let chatSignal
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const target = String(url)
+      if (options.method === 'POST' && target.endsWith('/api/projects/A/chat/stream')) {
+        chatSignal = options.signal
+        return new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+          })
+        })
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+    workspace.question.value = '从哪里开始阅读？'
+
+    const asking = workspace.askQuestion()
+    workspace.stopQuestion()
+    await asking
+
+    expect(chatSignal.aborted).toBe(true)
+    expect(workspace.asking.value).toBe(false)
+    expect(workspace.chatMessages.value.at(-1).text).toBe('已中止回答。')
+  })
 })

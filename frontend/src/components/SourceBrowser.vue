@@ -2,8 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
+import { sortAnnotations } from '../composables/useProjectHelper'
 
 const props = defineProps({
+  annotations: { type: Array, default: () => [] },
+  annotationError: { type: String, default: '' },
+  annotationLoading: { type: Boolean, default: false },
+  annotationSaving: { type: Boolean, default: false },
   error: { type: String, default: '' },
   file: { type: Object, default: null },
   fileLoading: { type: Boolean, default: false },
@@ -12,9 +17,12 @@ const props = defineProps({
   tree: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['load-file', 'refresh'])
+const emit = defineEmits(['create-annotation', 'delete-annotation', 'load-file', 'refresh', 'update-annotation'])
 const collapsedDirs = ref(new Set())
 const sourceRows = computed(() => flattenSourceTree(props.tree))
+const annotationDraft = ref({ id: '', line: null, body: '', mode: 'idle' })
+const highlightedLine = ref(null)
+const lineElements = new Map()
 
 // ---- Code Folding State ----
 const foldedLines = ref(new Set())
@@ -36,11 +44,26 @@ const foldRegions = computed(() => {
 })
 
 const foldStartSet = computed(() => new Set(foldRegions.value.map(r => r.startLine)))
+const sortedAnnotations = computed(() => sortAnnotations(props.annotations))
+const annotatedLineSet = computed(() => new Set(props.annotations.filter(item => item.line).map(item => item.line)))
+const annotationCountByLine = computed(() => {
+  const counts = new Map()
+  for (const item of props.annotations) {
+    if (!item.line) continue
+    counts.set(item.line, (counts.get(item.line) || 0) + 1)
+  }
+  return counts
+})
 
 // Reset fold state when file changes
 watch(
   () => props.file?.path,
-  () => { foldedLines.value = new Set() },
+  () => {
+    foldedLines.value = new Set()
+    annotationDraft.value = { id: '', line: null, body: '', mode: 'idle' }
+    highlightedLine.value = null
+    lineElements.clear()
+  },
 )
 
 function toggleFold(lineIndex) {
@@ -92,6 +115,66 @@ function handleRowClick(item) {
     return
   }
   emit('load-file', item.path)
+}
+
+// ---- Source Annotations ----
+function startAnnotation(line = null) {
+  annotationDraft.value = { id: '', line, body: '', mode: 'create' }
+  if (line) {
+    jumpToLine(line)
+  }
+}
+
+function editAnnotation(annotation) {
+  annotationDraft.value = {
+    id: annotation.id,
+    line: annotation.line,
+    body: annotation.body,
+    mode: 'edit',
+  }
+  if (annotation.line) {
+    jumpToLine(annotation.line)
+  }
+}
+
+function cancelAnnotationDraft() {
+  annotationDraft.value = { id: '', line: null, body: '', mode: 'idle' }
+}
+
+function submitAnnotation() {
+  const body = annotationDraft.value.body.trim()
+  if (!body || !props.file) return
+  if (annotationDraft.value.mode === 'edit') {
+    const annotation = props.annotations.find((item) => item.id === annotationDraft.value.id)
+    if (annotation) emit('update-annotation', annotation, body)
+  } else {
+    emit('create-annotation', {
+      path: props.file.path,
+      line: annotationDraft.value.line,
+      body,
+    })
+  }
+  cancelAnnotationDraft()
+}
+
+function annotationLineLabel(annotation) {
+  return annotation.line ? `L${annotation.line}` : '文件'
+}
+
+function setLineElement(el, line) {
+  if (el) {
+    lineElements.set(line, el)
+  } else {
+    lineElements.delete(line)
+  }
+}
+
+function jumpToLine(line) {
+  highlightedLine.value = line
+  const lineElement = lineElements.get(line)
+  if (typeof lineElement?.scrollIntoView === 'function') {
+    lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 }
 
 // ---- Syntax Highlighting ----
@@ -298,14 +381,70 @@ function detectBraceFolds(lines) {
           </span>
           <span class="file-actions">
             <small>{{ file.size }} bytes{{ file.truncated ? ' · 已截断' : '' }}</small>
+            <button class="icon-action annotate-file-action" :disabled="annotationSaving" @click="startAnnotation(null)">
+              <MessageSquarePlus :size="15" />
+              <span>文件批注</span>
+            </button>
           </span>
+        </div>
+        <div v-if="file" class="annotation-workbench" aria-label="源码批注">
+          <div class="annotation-head">
+            <span><MessageSquareText :size="16" />批注</span>
+            <small v-if="annotationLoading">加载中...</small>
+            <small v-else>{{ annotations.length }} 条</small>
+          </div>
+          <p v-if="annotationError" class="error annotation-error">{{ annotationError }}</p>
+          <form
+            v-if="annotationDraft.mode !== 'idle'"
+            class="annotation-form"
+            @submit.prevent="submitAnnotation"
+          >
+            <span class="annotation-target">{{ annotationDraft.line ? `L${annotationDraft.line}` : '文件批注' }}</span>
+            <textarea
+              v-model="annotationDraft.body"
+              :disabled="annotationSaving"
+              maxlength="4000"
+              placeholder="写下这段源码的理解、问题或待验证点"
+            />
+            <span class="annotation-form-actions">
+              <button type="button" class="ghost-action" @click="cancelAnnotationDraft">取消</button>
+              <button type="submit" class="solid-action" :disabled="annotationSaving || !annotationDraft.body.trim()">
+                {{ annotationDraft.mode === 'edit' ? '保存' : '添加' }}
+              </button>
+            </span>
+          </form>
+          <div v-if="sortedAnnotations.length" class="annotation-list">
+            <article
+              v-for="annotation in sortedAnnotations"
+              :key="annotation.id"
+              class="annotation-item"
+              @click="annotation.line && jumpToLine(annotation.line)"
+            >
+              <strong>{{ annotationLineLabel(annotation) }}</strong>
+              <p>{{ annotation.body }}</p>
+              <span class="annotation-actions">
+                <button type="button" @click.stop="editAnnotation(annotation)">编辑</button>
+                <button type="button" @click.stop="emit('delete-annotation', annotation)">删除</button>
+              </span>
+            </article>
+          </div>
+          <p v-else-if="!annotationLoading" class="muted annotation-empty">还没有批注，可以从源码行旁添加。</p>
         </div>
         <div v-if="file" class="source-code" role="code-viewer">
           <div
             v-for="(lineHtml, i) in codeLines"
             :key="i"
+            :ref="(el) => setLineElement(el, i + 1)"
             v-show="!isLineHidden(i)"
-            :class="['code-line', { 'fold-start': foldStartSet.has(i), 'folded': foldedLines.has(i) }]"
+            :class="[
+              'code-line',
+              {
+                annotated: annotatedLineSet.has(i + 1),
+                highlighted: highlightedLine === i + 1,
+                'fold-start': foldStartSet.has(i),
+                folded: foldedLines.has(i),
+              },
+            ]"
           >
             <span
               v-if="foldStartSet.has(i)"
@@ -319,6 +458,16 @@ function detectBraceFolds(lines) {
             </span>
             <span v-else class="fold-gutter" />
             <span class="line-number">{{ i + 1 }}</span>
+            <button
+              type="button"
+              class="line-annotation-button"
+              :aria-label="annotatedLineSet.has(i + 1) ? `查看或新增第 ${i + 1} 行批注` : `给第 ${i + 1} 行添加批注`"
+              @click="startAnnotation(i + 1)"
+            >
+              <MessageSquareText v-if="annotatedLineSet.has(i + 1)" :size="13" />
+              <MessageSquarePlus v-else :size="13" />
+              <small v-if="annotationCountByLine.get(i + 1)">{{ annotationCountByLine.get(i + 1) }}</small>
+            </button>
             <span class="line-content" v-html="lineHtml" />
           </div>
         </div>

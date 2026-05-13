@@ -2,11 +2,11 @@ import json
 
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app import analyzer
 from app.config import Settings
 from app.database import Database
 from app.main import app
-import app.main as main_module
 
 
 def parse_sse_events(text: str):
@@ -20,7 +20,7 @@ def parse_sse_events(text: str):
 
 
 def install_test_runtime(monkeypatch, tmp_path):
-    settings = Settings(deepseek_api_key="", PROJECT_HELPER_DATA_DIR=tmp_path / "data")
+    settings = Settings(deepseek_api_key="", data_dir=tmp_path / "data")
     db = Database(settings.db_path)
     monkeypatch.setattr(main_module, "settings", settings)
     monkeypatch.setattr(main_module, "db", db)
@@ -74,9 +74,57 @@ def test_project_create_analyze_cache_and_chat_flow(monkeypatch, tmp_path):
     assert source_file.json()["path"] == "app/main.py"
     assert "def health" in source_file.json()["content"]
 
+    annotation = client.post(
+        f"/api/projects/{project['id']}/source/annotations",
+        json={"path": "app/main.py", "line": 1, "body": "这里是健康检查入口"},
+    )
+    assert annotation.status_code == 200
+    annotation_data = annotation.json()
+    assert annotation_data["project_id"] == project["id"]
+    assert annotation_data["path"] == "app/main.py"
+    assert annotation_data["line"] == 1
+    assert annotation_data["body"] == "这里是健康检查入口"
+
+    file_annotation = client.post(
+        f"/api/projects/{project['id']}/source/annotations",
+        json={"path": "app/main.py", "body": "文件级批注"},
+    )
+    assert file_annotation.status_code == 200
+    assert file_annotation.json()["line"] is None
+
+    annotations = client.get(
+        f"/api/projects/{project['id']}/source/annotations",
+        params={"path": "app/main.py"},
+    )
+    assert annotations.status_code == 200
+    assert [item["body"] for item in annotations.json()["annotations"]] == ["文件级批注", "这里是健康检查入口"]
+
+    updated_annotation = client.patch(
+        f"/api/projects/{project['id']}/source/annotations/{annotation_data['id']}",
+        json={"body": "已确认健康检查入口"},
+    )
+    assert updated_annotation.status_code == 200
+    assert updated_annotation.json()["body"] == "已确认健康检查入口"
+
+    deleted_annotation = client.delete(f"/api/projects/{project['id']}/source/annotations/{annotation_data['id']}")
+    assert deleted_annotation.status_code == 204
+    assert client.get(f"/api/projects/{project['id']}/source/annotations", params={"path": "app/main.py"}).json()["annotations"][0]["body"] == "文件级批注"
+
+    invalid_line_annotation = client.post(
+        f"/api/projects/{project['id']}/source/annotations",
+        json={"path": "app/main.py", "line": 99, "body": "越界"},
+    )
+    assert invalid_line_annotation.status_code == 400
+
     traversal = client.get(f"/api/projects/{project['id']}/source/file", params={"path": "../secrets.py"})
     assert traversal.status_code == 400
     assert "仓库之外" in traversal.json()["detail"]
+
+    traversal_annotation = client.post(
+        f"/api/projects/{project['id']}/source/annotations",
+        json={"path": "../secrets.py", "line": 1, "body": "不允许"},
+    )
+    assert traversal_annotation.status_code == 400
 
     cached_stream = client.get(f"/api/projects/{project['id']}/analyze/stream")
     cached_events = parse_sse_events(cached_stream.text)

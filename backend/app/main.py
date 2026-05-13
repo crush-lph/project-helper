@@ -37,36 +37,27 @@ Python 知识点 —— raise：
 
 from __future__ import annotations
 
-import shutil       # 文件/目录操作（用于删除本地仓库副本）
+import asyncio
+import shutil
+from collections import defaultdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-# FastAPI：Web 框架，类似 Express.js
-# HTTPException：HTTP 错误异常，FastAPI 自动转为 JSON 响应
-# Query：URL 查询参数的声明和校验
-
 from fastapi.middleware.cors import CORSMiddleware
-# CORS 中间件：处理跨域请求，类似 Express 的 cors 包
-
 from fastapi.responses import StreamingResponse
-# 流式响应：用于 SSE（Server-Sent Events）
-
 from pydantic import BaseModel, Field, HttpUrl
-# BaseModel：数据模型基类，类似 Zod schema
-# Field：字段描述（默认值、校验规则）
-# HttpUrl：URL 类型（自动校验格式）
 
 from .analyzer import analyze_project_stream, chat_stream
 from .config import get_settings
 from .database import Database
 from .guardrails import check_prompt_injection
+from .observability import get_metrics
 from .repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
 from .source_scan import SourceBrowseError, build_source_tree, read_source_file
 
-
-# ---- 应用初始化 ----
-settings = get_settings()       # 获取配置单例
-db = Database(settings.db_path) # 创建数据库连接
+settings = get_settings()
+db = Database(settings.db_path)
+_analysis_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 app = FastAPI(title="project-helper API", version="0.1.0")
 # FastAPI() 创建应用实例，类似 Express 的 express()
@@ -110,21 +101,35 @@ class ChatRequest(BaseModel):
       min_length → 最短 1 个字符
       max_length → 最长 2000 个字符
     超出范围时，FastAPI 自动返回 422 错误。
+
+    注意：聊天历史由 Agent checkpointer 自动管理，不再需要前端传递 history。
     """
     question: str = Field(..., min_length=1, max_length=2000)
+    file_paths: list[str] = Field(default_factory=list, max_length=10)
+
+
+class SourceAnnotationCreate(BaseModel):
+    """创建源码批注的请求体。"""
+    path: str = Field(..., min_length=1, max_length=1000)
+    line: int | None = Field(default=None, ge=1)
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
+class SourceAnnotationUpdate(BaseModel):
+    """更新源码批注正文的请求体。"""
+    body: str = Field(..., min_length=1, max_length=4000)
 
 
 # ---- 路由定义 ----
 
 @app.get("/api/health")
 def health():
-    """
-    健康检查端点。
-
-    返回应用状态、模型名、LLM 是否已配置。
-    前端类比：类似 /api/ping，用于检测后端是否存活。
-    """
     return {"ok": True, "model": settings.deepseek_model, "llm_configured": bool(settings.deepseek_api_key)}
+
+
+@app.get("/api/metrics")
+def metrics():
+    return get_metrics().snapshot()
 
 
 @app.get("/api/projects")
@@ -207,6 +212,33 @@ def get_ready_project(project_id: str) -> dict:
     return project
 
 
+def get_existing_project(project_id: str) -> dict:
+    """获取项目，不要求项目已完成分析。"""
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return project
+
+
+def validate_annotation_target(project_id: str, path: str, line: int | None) -> str:
+    """
+    校验批注目标文件。
+
+    批注不会写回源码，但创建时仍复用源码浏览的安全路径和文本文件校验。
+    """
+    project = get_ready_project(project_id)
+    try:
+        source_file = read_source_file(Path(project["local_path"]), path)
+    except SourceBrowseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if line is not None:
+        line_count = len(source_file["content"].split("\n")) if source_file["content"] else 0
+        if line_count == 0 or line > line_count:
+            raise HTTPException(status_code=400, detail="批注行号超出文件范围。")
+    return source_file["path"]
+
+
 @app.get("/api/projects/{project_id}/source/tree")
 def get_source_tree(project_id: str):
     """获取源码目录树（用于前端文件浏览器）。"""
@@ -232,6 +264,54 @@ def get_source_file(project_id: str, path: str = Query(..., min_length=1)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/projects/{project_id}/source/annotations")
+def list_source_annotations(project_id: str, path: str | None = Query(default=None, min_length=1)):
+    """获取项目源码批注，可按文件路径过滤。"""
+    get_existing_project(project_id)
+    return {"annotations": db.list_source_annotations(project_id, path)}
+
+
+@app.post("/api/projects/{project_id}/source/annotations")
+def create_source_annotation(project_id: str, payload: SourceAnnotationCreate):
+    """为源码文件或源码行创建批注。"""
+    normalized_path = validate_annotation_target(project_id, payload.path, payload.line)
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="批注内容不能为空。")
+    return db.create_source_annotation(
+        project_id=project_id,
+        path=normalized_path,
+        line=payload.line,
+        body=body,
+    )
+
+
+@app.patch("/api/projects/{project_id}/source/annotations/{annotation_id}")
+def update_source_annotation(project_id: str, annotation_id: str, payload: SourceAnnotationUpdate):
+    """更新源码批注正文。"""
+    get_existing_project(project_id)
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="批注内容不能为空。")
+    annotation = db.update_source_annotation(
+        project_id=project_id,
+        annotation_id=annotation_id,
+        body=body,
+    )
+    if not annotation:
+        raise HTTPException(status_code=404, detail="批注不存在")
+    return annotation
+
+
+@app.delete("/api/projects/{project_id}/source/annotations/{annotation_id}", status_code=204)
+def delete_source_annotation(project_id: str, annotation_id: str):
+    """删除源码批注。"""
+    get_existing_project(project_id)
+    if not db.delete_source_annotation(project_id=project_id, annotation_id=annotation_id):
+        raise HTTPException(status_code=404, detail="批注不存在")
+    return None
+
+
 @app.patch("/api/projects/{project_id}/pin")
 def update_project_pin(project_id: str, payload: ProjectPinUpdate):
     """切换项目置顶状态。"""
@@ -239,6 +319,21 @@ def update_project_pin(project_id: str, payload: ProjectPinUpdate):
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
+
+
+@app.get("/api/projects/{project_id}/chat/messages")
+def list_chat_messages(project_id: str):
+    """获取项目的问答历史。"""
+    get_existing_project(project_id)
+    return {"messages": db.list_chat_messages(project_id)}
+
+
+@app.delete("/api/projects/{project_id}/chat/messages", status_code=204)
+def clear_chat_messages(project_id: str):
+    """清空项目的问答历史。"""
+    get_existing_project(project_id)
+    db.clear_chat_messages(project_id)
+    return None
 
 
 @app.delete("/api/projects/{project_id}", status_code=204)
@@ -293,7 +388,7 @@ def stream_analysis(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return StreamingResponse(
-        analyze_project_stream(db, settings, project),
+        analyze_project_stream(db, settings, project, locks=_analysis_locks),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -320,8 +415,27 @@ def stream_chat(project_id: str, payload: ChatRequest):
         raise HTTPException(status_code=400, detail="问题不能为空")
     if check_prompt_injection(payload.question):
         raise HTTPException(status_code=400, detail="问题包含不允许的内容。")
+    file_paths = [p for p in (payload.file_paths or []) if p.strip()][:10]
+    question_text = payload.question.strip()
+    db.add_chat_message(project_id, "user", question_text)
+
+    async def _stream_and_save():
+        assistant_text = ""
+        async for chunk in chat_stream(settings, project, question_text, file_paths=file_paths):
+            if chunk.startswith("event: token\ndata: "):
+                import json as _json
+                try:
+                    data = _json.loads(chunk[len("event: token\ndata: "):].strip())
+                    assistant_text += data.get("text", "")
+                except Exception:
+                    pass
+            elif chunk.startswith("event: done"):
+                if assistant_text.strip():
+                    db.add_chat_message(project_id, "assistant", assistant_text.strip())
+            yield chunk
+
     return StreamingResponse(
-        chat_stream(settings, project, payload.question.strip()),
+        _stream_and_save(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

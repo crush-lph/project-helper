@@ -51,14 +51,21 @@ const workspace = useProjectHelper()
 
         <SourceBrowser
           v-show="workspace.activeView.value === 'source'"
+          :annotation-error="workspace.sourceAnnotationError.value"
+          :annotation-loading="workspace.sourceAnnotationLoading.value"
+          :annotation-saving="workspace.sourceAnnotationSaving.value"
+          :annotations="workspace.sourceAnnotations.value"
           :error="workspace.sourceError.value"
           :file="workspace.sourceFile.value"
           :file-loading="workspace.sourceFileLoading.value"
           :is-ready="workspace.isReady.value"
           :loading="workspace.sourceLoading.value"
           :tree="workspace.sourceTree.value"
+          @create-annotation="workspace.createSourceAnnotation"
+          @delete-annotation="workspace.deleteSourceAnnotation"
           @load-file="workspace.loadSourceFile"
           @refresh="workspace.fetchSourceTree"
+          @update-annotation="workspace.updateSourceAnnotation"
         />
 
         <ReportPanel
@@ -72,7 +79,11 @@ const workspace = useProjectHelper()
           :asking="workspace.asking.value"
           :is-ready="workspace.isReady.value"
           :messages="workspace.chatMessages.value"
+          :source-tree="workspace.sourceTree.value"
+          :referenced-files="workspace.referencedFiles.value"
           @ask="workspace.askQuestion"
+          @stop="workspace.stopQuestion"
+          @update:referenced-files="(files) => workspace.referencedFiles.value = files"
         />
       </section>
     </section>
