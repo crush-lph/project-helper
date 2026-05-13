@@ -38,6 +38,7 @@ Python 知识点 —— raise：
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 from collections import defaultdict
@@ -51,6 +52,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from .config import get_settings
 from .database import Database
+from .errors import classify_error
 from .guardrails import check_prompt_injection
 from .observability import get_metrics
 from .repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
@@ -473,18 +475,27 @@ def stream_chat(project_id: str, payload: ChatRequest):
 
     async def _stream_and_save():
         assistant_text = ""
-        async for chunk in chat_stream(settings, project, question_text, file_paths=file_paths):
-            if chunk.startswith("event: token\ndata: "):
-                import json as _json
-                try:
-                    data = _json.loads(chunk[len("event: token\ndata: "):].strip())
-                    assistant_text += data.get("text", "")
-                except Exception:
-                    pass
-            elif chunk.startswith("event: done"):
-                if assistant_text.strip():
-                    db.add_chat_message(project_id, "assistant", assistant_text.strip())
-            yield chunk
+        try:
+            async for chunk in chat_stream(settings, project, question_text, file_paths=file_paths):
+                if chunk.startswith("event: token\ndata: "):
+                    import json as _json
+                    try:
+                        data = _json.loads(chunk[len("event: token\ndata: "):].strip())
+                        assistant_text += data.get("text", "")
+                    except Exception:
+                        pass
+                elif chunk.startswith("event: done"):
+                    if assistant_text.strip():
+                        db.add_chat_message(project_id, "assistant", assistant_text.strip())
+                yield chunk
+        except Exception as exc:
+            _, message, original = classify_error(exc)
+            data = json.dumps(
+                {"message": message, "error_type": type(original).__name__},
+                ensure_ascii=False,
+            )
+            yield f"event: failed\ndata: {data}\n\n"
+            yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(
         _stream_and_save(),
