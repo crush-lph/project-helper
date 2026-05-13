@@ -2,7 +2,11 @@
 FROM node:20-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm ci
 COPY frontend/ ./
 ARG VITE_API_BASE=
 RUN npm run build
@@ -22,7 +26,11 @@ RUN sed -i \
 
 # Python deps
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    --timeout 120 \
+    --retries 10 \
+    -r requirements.txt
 
 # Backend source
 COPY backend/app ./app
