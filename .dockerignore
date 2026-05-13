@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Project runtime
+.project-helper-data/
+backend/.project-helper-data/
+
+# Git and CI
+.git/
+.github/
+.codex-run-logs/
+
+# Editor and OS
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Docs and specs
+docs/
+openspec/
+README.md
+
+# Dev config
+.pre-commit-config.yaml
+.env
+backend/.env
+backend/tests/
+frontend/tests/
+frontend/playwright.config.js

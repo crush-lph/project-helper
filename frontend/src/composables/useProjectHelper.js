@@ -3,7 +3,7 @@ import { useDialog } from 'naive-ui'
 import { errorMessage, responseDetail } from '../helpers/http'
 import { parseSse } from '../helpers/sse'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
 
 export const pipelineSteps = [
   { key: 'connect', label: '建立任务', hint: '创建项目并连接实时通道' },

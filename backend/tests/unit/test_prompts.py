@@ -34,7 +34,7 @@ def test_list_prompts():
 
 
 def test_build_report_prompt_regression():
-    from app.llm import build_report_prompt
+    from app.agents.report_agent import build_report_prompt
 
     result = build_report_prompt("https://github.com/owner/repo", {"stack": ["Python"]})
     assert "project-helper" in result

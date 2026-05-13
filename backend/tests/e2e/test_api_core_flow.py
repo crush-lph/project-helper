@@ -3,7 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app import analyzer
+from app.services import analysis as analysis_service
 from app.config import Settings
 from app.database import Database
 from app.main import app
@@ -38,8 +38,8 @@ def fake_clone_or_update(repo_url, root):
 
 def test_project_create_analyze_cache_and_chat_flow(monkeypatch, tmp_path):
     settings, db = install_test_runtime(monkeypatch, tmp_path)
-    monkeypatch.setattr(analyzer, "clone_or_update", fake_clone_or_update)
-    monkeypatch.setattr(analyzer, "generate_llm_report", lambda settings, repo_url, summary: None)
+    monkeypatch.setattr(analysis_service, "clone_or_update", fake_clone_or_update)
+    monkeypatch.setattr(analysis_service, "generate_llm_report", lambda settings, repo_url, summary: None)
     client = TestClient(app)
 
     health = client.get("/api/health")
@@ -189,8 +189,8 @@ def test_api_rejects_oversized_question(monkeypatch, tmp_path):
 
 def test_api_rejects_prompt_injection(monkeypatch, tmp_path):
     install_test_runtime(monkeypatch, tmp_path)
-    monkeypatch.setattr(analyzer, "clone_or_update", fake_clone_or_update)
-    monkeypatch.setattr(analyzer, "generate_llm_report", lambda settings, repo_url, summary: None)
+    monkeypatch.setattr(analysis_service, "clone_or_update", fake_clone_or_update)
+    monkeypatch.setattr(analysis_service, "generate_llm_report", lambda settings, repo_url, summary: None)
     client = TestClient(app)
 
     created = client.post("/api/projects", json={"repo_url": "https://github.com/owner/repo"})

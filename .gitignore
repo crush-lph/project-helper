@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.coverage
 
 # Node/Vite
 node_modules/

@@ -1,4 +1,4 @@
-from app.llm import read_repo_file
+from app.tools.file_ops import read_repo_file
 
 
 def test_read_repo_file_rejects_sibling_directory_with_same_prefix(tmp_path):

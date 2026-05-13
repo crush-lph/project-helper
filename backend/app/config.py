@@ -17,13 +17,35 @@ Python 知识点：
     后续调用直接返回缓存值。类似 React 的 useMemo，但作用于函数。
 """
 
-from functools import lru_cache  # 标准库的缓存装饰器，不需要 npm install
-from pathlib import Path         # Python 的路径处理库，比 os.path 更好用
-from pydantic import Field       # Pydantic 的字段描述，支持默认值、别名、校验
+import os
+from functools import lru_cache
+from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 # pydantic-settings 是 Pydantic 的扩展，专门用于管理配置。
 # BaseSettings 是基类，它会自动从环境变量和 .env 文件中读取值。
 # SettingsConfigDict 用于配置这个 Settings 类自身的行为（比如 .env 文件路径）。
+
+
+def _detect_ssl_cert() -> str | None:
+    """Auto-detect a valid SSL CA bundle path.
+
+    Python.org macOS builds ship with their own OpenSSL that cannot find
+    the system certificate store.  This function tries certifi first,
+    then falls back to common system paths.
+    """
+    env_path = os.environ.get("SSL_CERT_FILE")
+    if env_path and Path(env_path).exists():
+        return env_path
+    try:
+        import certifi
+        return certifi.where()
+    except ImportError:
+        pass
+    for p in ("/etc/ssl/cert.pem", "/etc/pki/tls/certs/ca-bundle.crt"):
+        if Path(p).exists():
+            return p
+    return None
 
 
 class Settings(BaseSettings):
@@ -63,6 +85,18 @@ class Settings(BaseSettings):
     # Agent 配置
     agent_max_iterations: int = Field(default=8, ge=1, le=50)
     agent_max_execution_time: int = Field(default=60, ge=10, le=300)
+
+    # 环境配置
+    environment: str = Field(default="development", pattern="^(development|staging|production)$")
+    allowed_origins: str = "http://localhost,http://localhost:5173,http://127.0.0.1"
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+    @property
+    def allowed_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
     # model_config 告诉 Pydantic 如何读取配置
     model_config = SettingsConfigDict(
@@ -106,6 +140,14 @@ class Settings(BaseSettings):
           这里用 set 是因为只需要判断"某个 host 是否在允许列表中"。
         """
         return {host.strip().lower() for host in self.allowed_hosts.split(",") if host.strip()}
+
+    @property
+    def ssl_cert_file(self) -> str | None:
+        return _detect_ssl_cert()
+
+    @property
+    def ssl_cert_configured(self) -> bool:
+        return self.ssl_cert_file is not None
 
 
 @lru_cache  # 缓存装饰器：第一次调用创建 Settings 实例，后续调用直接返回缓存

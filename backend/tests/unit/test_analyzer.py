@@ -2,8 +2,10 @@ import asyncio
 import time
 from collections import defaultdict
 
-from app import analyzer
-from app.analyzer import analyze_project_stream, chat_stream, local_report, sse, make_analysis_locks
+from app.services import analysis as analysis_service
+from app.services.analysis import analyze_project_stream, make_analysis_locks, sse
+from app.services.chat import chat_stream
+from app.agents.report_agent import local_report
 from app.config import Settings
 from app.database import Database
 
@@ -63,7 +65,8 @@ def test_chat_stream_yields_agent_steps_incrementally(monkeypatch, tmp_path):
             time.sleep(0.2)
             yield {"event": "on_chat_model_stream", "data": {"chunk": FakeMessage(" second")}}
 
-    monkeypatch.setattr(analyzer, "create_code_agent", lambda settings, root_path: FakeAgent())
+    from app.services import chat as chat_service
+    monkeypatch.setattr(chat_service, "create_code_agent", lambda settings, root_path: FakeAgent())
     settings = Settings(deepseek_api_key="test-key", data_dir=tmp_path / "data")
     project = {"local_path": str(tmp_path), "id": "proj-1"}
 
@@ -104,7 +107,7 @@ def test_analyze_stream_serializes_concurrent_runs_for_same_project(monkeypatch,
             "status": "created",
         }
     )
-    monkeypatch.setattr(analyzer, "clone_or_update", fake_clone_or_update)
+    monkeypatch.setattr(analysis_service, "clone_or_update", fake_clone_or_update)
 
     project_locks = make_analysis_locks()
 

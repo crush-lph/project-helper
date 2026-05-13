@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.analyzer import chat_stream
+from app.services.chat import chat_stream
 from app.config import Settings
 from .golden_cases import CHAT_CASES
 

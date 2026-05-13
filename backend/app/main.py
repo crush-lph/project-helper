@@ -38,16 +38,19 @@ Python 知识点 —— raise：
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, HttpUrl
 
-from .analyzer import analyze_project_stream, chat_stream
+from .services.analysis import analyze_project_stream
+from .services.chat import chat_stream
 from .config import get_settings
 from .database import Database
 from .guardrails import check_prompt_injection
@@ -56,20 +59,82 @@ from .repository import RepositoryError, normalize_repo_url, project_id_for, pro
 from .source_scan import SourceBrowseError, build_source_tree, read_source_file
 
 settings = get_settings()
+
+os.environ.pop("SSL_CERT_FILE", None)
+if settings.ssl_cert_file:
+    os.environ["SSL_CERT_FILE"] = settings.ssl_cert_file
+
 db = Database(settings.db_path)
 _analysis_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 app = FastAPI(title="project-helper API", version="0.1.0")
-# FastAPI() 创建应用实例，类似 Express 的 express()
 
+# CORS — 根据环境配置允许的来源
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # 允许所有来源（开发阶段方便，生产环境应该限制）
+    allow_origins=settings.allowed_origin_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
-# CORS 中间件：类似 Express 的 app.use(cors({ origin: '*' }))
+
+# ---- Static file serving (production: frontend dist) ----
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+if STATIC_DIR.is_dir():
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_frontend(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("assets/"):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        index = STATIC_DIR / "index.html"
+        if not index.exists():
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        return FileResponse(str(index))
+
+
+# ---- Rate Limiting (simple in-memory) ----
+
+class _RateLimiter:
+    """Simple sliding-window rate limiter per IP."""
+
+    def __init__(self, max_requests: int = 30, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._requests: dict[str, list[float]] = {}
+
+    def is_allowed(self, key: str) -> bool:
+        import time
+        now = time.monotonic()
+        cutoff = now - self.window
+        timestamps = self._requests.setdefault(key, [])
+        # Prune old entries
+        self._requests[key] = [t for t in timestamps if t > cutoff]
+        if len(self._requests[key]) >= self.max_requests:
+            return False
+        self._requests[key].append(now)
+        return True
+
+
+_rate_limiter = _RateLimiter(max_requests=30, window_seconds=60)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Only rate-limit expensive endpoints
+    if request.url.path.endswith("/chat/stream") or request.url.path.endswith("/analyze/stream"):
+        client_ip = request.client.host if request.client else "unknown"
+        if not _rate_limiter.is_allowed(client_ip):
+            return JSONResponse(status_code=429, content={"detail": "请求过于频繁，请稍后重试。"})
+    response = await call_next(request)
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ---- 请求体模型 ----
