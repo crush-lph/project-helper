@@ -78,21 +78,8 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-# ---- Static file serving (production: frontend dist) ----
+# ---- Static file directory (production: frontend dist) ----
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-if STATIC_DIR.is_dir():
-    assets_dir = STATIC_DIR / "assets"
-    if assets_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def _serve_frontend(full_path: str):
-        if full_path.startswith("api/") or full_path.startswith("assets/"):
-            return JSONResponse(status_code=404, content={"detail": "Not found"})
-        index = STATIC_DIR / "index.html"
-        if not index.exists():
-            return JSONResponse(status_code=404, content={"detail": "Not found"})
-        return FileResponse(str(index))
 
 
 # ---- Rate Limiting (simple in-memory) ----
@@ -504,3 +491,21 @@ def stream_chat(project_id: str, payload: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---- Static file serving (production: frontend dist) ----
+# Register this after all API routes. The catch-all SPA route would otherwise
+# intercept /api/* before FastAPI reaches the concrete API handlers.
+if STATIC_DIR.is_dir():
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_frontend(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("assets/"):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        index = STATIC_DIR / "index.html"
+        if not index.exists():
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        return FileResponse(str(index))
