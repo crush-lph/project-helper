@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -60,7 +60,8 @@ def generate_llm_report(settings: Settings, repo_url: str, summary: dict[str, An
     # Layer 1: structured output (json_mode)
     try:
         structured_llm = llm.with_structured_output(ReportOutput, method="json_mode")
-        result = structured_llm.invoke(build_report_prompt(repo_url, summary))
+        structured_result = structured_llm.invoke(build_report_prompt(repo_url, summary))
+        result = cast(ReportOutput, structured_result)
     except Exception:
         logger.warning("structured output failed, falling back to raw prompt", exc_info=True)
 

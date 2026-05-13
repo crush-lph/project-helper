@@ -83,7 +83,7 @@ class LLMCallLogger(BaseCallbackHandler):
 
     def _evict_stale(self, mapping: dict[UUID, float]) -> None:
         if len(mapping) > self._MAX_PENDING:
-            oldest = sorted(mapping, key=mapping.get)[: len(mapping) - self._MAX_PENDING // 2]
+            oldest = sorted(mapping, key=lambda run_id: mapping[run_id])[: len(mapping) - self._MAX_PENDING // 2]
             for key in oldest:
                 del mapping[key]
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from .config import Settings
 from .observability import LLMCallLogger
@@ -15,12 +16,12 @@ def get_llm(settings: Settings, streaming: bool = False) -> ChatOpenAI | None:
     if not settings.deepseek_api_key:
         return None
     return ChatOpenAI(
-        api_key=settings.deepseek_api_key,
+        api_key=SecretStr(settings.deepseek_api_key),
         base_url=settings.deepseek_base_url,
         model=settings.deepseek_model,
         temperature=0.2,
         streaming=streaming,
         max_retries=settings.llm_max_retries,
-        request_timeout=settings.llm_timeout,
+        timeout=settings.llm_timeout,
         callbacks=[_build_llm_logger()],
     )

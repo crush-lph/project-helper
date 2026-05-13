@@ -29,7 +29,7 @@ def create_code_agent(settings: Settings, root_path: str):
     return create_react_agent(
         llm,
         tools,
-        prompt=system_prompt,
+        messages_modifier=system_prompt,
         checkpointer=get_checkpointer(),
     )
 
