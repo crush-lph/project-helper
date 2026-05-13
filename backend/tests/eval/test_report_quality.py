@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.agents.report_agent import local_report
+
 from .checks import (
     check_file_refs_valid,
     check_no_forbidden_phrases,

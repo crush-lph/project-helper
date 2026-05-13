@@ -20,8 +20,10 @@ Python 知识点：
 import os
 from functools import lru_cache
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 # pydantic-settings 是 Pydantic 的扩展，专门用于管理配置。
 # BaseSettings 是基类，它会自动从环境变量和 .env 文件中读取值。
 # SettingsConfigDict 用于配置这个 Settings 类自身的行为（比如 .env 文件路径）。

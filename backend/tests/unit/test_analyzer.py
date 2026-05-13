@@ -1,13 +1,12 @@
 import asyncio
 import time
-from collections import defaultdict
 
-from app.services import analysis as analysis_service
-from app.services.analysis import analyze_project_stream, make_analysis_locks, sse
-from app.services.chat import chat_stream
 from app.agents.report_agent import local_report
 from app.config import Settings
 from app.database import Database
+from app.services import analysis as analysis_service
+from app.services.analysis import analyze_project_stream, make_analysis_locks, sse
+from app.services.chat import chat_stream
 
 
 def test_sse_formats_named_event_with_json_payload():

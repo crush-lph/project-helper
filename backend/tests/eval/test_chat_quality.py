@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
 from app.services.chat import chat_stream
-from app.config import Settings
+
 from .golden_cases import CHAT_CASES
 
 

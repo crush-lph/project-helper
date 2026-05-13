@@ -5,8 +5,8 @@ import json
 import logging
 from uuid import uuid4
 
-from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 
 from app.observability import LLMCallLogger, get_logger
 

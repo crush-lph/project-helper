@@ -49,13 +49,13 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, HttpUrl
 
-from .services.analysis import analyze_project_stream
-from .services.chat import chat_stream
 from .config import get_settings
 from .database import Database
 from .guardrails import check_prompt_injection
 from .observability import get_metrics
 from .repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
+from .services.analysis import analyze_project_stream
+from .services.chat import chat_stream
 from .source_scan import SourceBrowseError, build_source_tree, read_source_file
 
 settings = get_settings()

@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from app.source_scan import SourceBrowseError, build_source_tree, build_tree, read_source_file, scan_repository, search_code
+from app.source_scan import (
+    SourceBrowseError,
+    build_source_tree,
+    build_tree,
+    read_source_file,
+    scan_repository,
+    search_code,
+)
 
 
 def write(path: Path, text: str) -> None:

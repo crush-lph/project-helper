@@ -3,10 +3,10 @@ import json
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app.services import analysis as analysis_service
 from app.config import Settings
 from app.database import Database
 from app.main import app
+from app.services import analysis as analysis_service
 
 
 def parse_sse_events(text: str):

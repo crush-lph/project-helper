@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import os
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any
-
 
 IGNORE_DIRS = {
     ".git", ".idea", ".vscode", "__pycache__", "node_modules", "dist", "build",
