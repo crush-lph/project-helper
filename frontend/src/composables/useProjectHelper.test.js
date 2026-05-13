@@ -36,6 +36,18 @@ function jsonResponse(data, ok = true) {
   }
 }
 
+function streamResponse(text) {
+  return {
+    ok: true,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(text))
+        controller.close()
+      },
+    }),
+  }
+}
+
 function deferred() {
   let resolve
   const promise = new Promise((done) => {
@@ -229,5 +241,36 @@ describe('useProjectHelper', () => {
     expect(chatSignal.aborted).toBe(true)
     expect(workspace.asking.value).toBe(false)
     expect(workspace.chatMessages.value.at(-1).text).toBe('已中止回答。')
+  })
+
+  it('streams agent tool events into the assistant bubble before final answer tokens', async () => {
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const target = String(url)
+      if (options.method === 'POST' && target.endsWith('/api/projects/A/chat/stream')) {
+        return streamResponse([
+          'event: agent\ndata: {"type":"action","data":{"tool":"search_repo","input":"入口"}}',
+          'event: agent\ndata: {"type":"observation","data":{"output":"app/main.py:1: def health()"}}',
+          'event: token\ndata: {"text":"入口在 `app/main.py`。"}',
+          'event: done\ndata: {}',
+          '',
+        ].join('\n\n'))
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+    workspace.question.value = '入口在哪里？'
+
+    await workspace.askQuestion()
+
+    const assistantText = workspace.chatMessages.value.at(-1).text
+    expect(assistantText).toContain('正在调用 `search_repo`')
+    expect(assistantText).toContain('入口')
+    expect(assistantText).toContain('工具返回')
+    expect(assistantText).toContain('app/main.py:1')
+    expect(assistantText).toContain('入口在 `app/main.py`。')
   })
 })

@@ -656,8 +656,30 @@ function handleChatEvent(event, assistant) {
     assistant.text += event.data.text || ''
     return false
   }
+  if (event.event === 'agent') {
+    const text = formatAgentEvent(event.data)
+    if (text) {
+      assistant.text += `${assistant.text ? '\n\n' : ''}${text}`
+    }
+    return false
+  }
   if (event.event === 'failed' || event.event === 'error') {
     throw new Error(event.data.message || '问答失败，请稍后重试。')
   }
   return event.event === 'done'
+}
+
+function formatAgentEvent(eventData) {
+  const kind = eventData?.type
+  const data = eventData?.data || {}
+  if (kind === 'action') {
+    const tool = data.tool || 'tool'
+    const input = data.input ? `：${data.input}` : ''
+    return `> 正在调用 \`${tool}\`${input}`
+  }
+  if (kind === 'observation') {
+    const output = data.output || ''
+    return output ? `> 工具返回：\n\n\`\`\`text\n${output}\n\`\`\`` : '> 工具已返回结果。'
+  }
+  return ''
 }
