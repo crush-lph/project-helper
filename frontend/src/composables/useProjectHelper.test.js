@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { watch } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useProjectHelper } from './useProjectHelper'
 
@@ -45,6 +46,24 @@ function streamResponse(text) {
         controller.close()
       },
     }),
+  }
+}
+
+function controlledStreamResponse() {
+  let controller
+  const body = new ReadableStream({
+    start(streamController) {
+      controller = streamController
+    },
+  })
+  return {
+    response: { ok: true, body },
+    enqueue(text) {
+      controller.enqueue(new TextEncoder().encode(text))
+    },
+    close() {
+      controller.close()
+    },
   }
 }
 
@@ -272,5 +291,43 @@ describe('useProjectHelper', () => {
     expect(assistantText).toContain('工具返回')
     expect(assistantText).toContain('app/main.py:1')
     expect(assistantText).toContain('入口在 `app/main.py`。')
+  })
+
+  it('notifies Vue when each chat token arrives before the stream completes', async () => {
+    const stream = controlledStreamResponse()
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const target = String(url)
+      if (options.method === 'POST' && target.endsWith('/api/projects/A/chat/stream')) {
+        return stream.response
+      }
+      if (target.endsWith('/api/projects')) {
+        return jsonResponse({ projects: [] })
+      }
+      throw new Error(`Unhandled fetch: ${target}`)
+    })
+    const workspace = mountComposable()
+    workspace.activeProject.value = { id: 'A', repo_url: 'repo-a', status: 'ready' }
+    workspace.question.value = '入口在哪里？'
+    const updates = []
+    watch(
+      () => workspace.chatMessages.value.at(-1)?.text,
+      (text) => updates.push(text),
+      { flush: 'sync' },
+    )
+
+    const asking = workspace.askQuestion()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    stream.enqueue('event: token\ndata: {"text":"第一段"}\n\n')
+    await Promise.resolve()
+    expect(updates).toContain('第一段')
+
+    stream.enqueue('event: token\ndata: {"text":"第二段"}\n\n')
+    stream.enqueue('event: done\ndata: {}\n\n')
+    stream.close()
+    await asking
+
+    expect(updates).toContain('第一段第二段')
   })
 })

@@ -509,8 +509,8 @@ export function useProjectHelper() {
     referencedFiles.value = []
     const history = chatMessages.value.map((m) => ({ role: m.role, text: m.text }))
     chatMessages.value.push({ role: 'user', text: userText + (files.length ? ` [引用: ${files.join(', ')}]` : '') })
-    const assistant = { role: 'assistant', text: '' }
-    chatMessages.value.push(assistant)
+    chatMessages.value.push({ role: 'assistant', text: '' })
+    const assistant = chatMessages.value.at(-1)
     activeChatController = controller
     activeChatAssistant = assistant
 
