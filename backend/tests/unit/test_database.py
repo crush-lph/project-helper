@@ -1,3 +1,5 @@
+import sqlite3
+
 from app.database import Database
 
 
@@ -121,3 +123,98 @@ def test_source_annotations_are_deleted_with_project(tmp_path):
     db.delete_project("project-1")
 
     assert db.list_source_annotations("project-1") == []
+
+
+def test_users_sessions_and_projects_are_isolated_by_user(tmp_path):
+    db = Database(tmp_path / "project_helper.sqlite3")
+    alice = db.create_user("alice", "secret-1")
+    bob = db.create_user("bob", "secret-2")
+
+    assert db.verify_user_password("alice", "wrong") is None
+    assert db.verify_user_password("alice", "secret-1")["id"] == alice["id"]
+
+    token = db.create_session(alice["id"])
+    assert db.get_user_by_session(token)["username"] == "alice"
+
+    alice_project = db.upsert_project_for_user(
+        alice["id"],
+        sample_project(id="alice-project", repo_url="https://github.com/owner/repo"),
+    )
+    bob_project = db.upsert_project_for_user(
+        bob["id"],
+        sample_project(id="bob-project", repo_url="https://github.com/owner/repo"),
+    )
+
+    assert alice_project["id"] != bob_project["id"]
+    assert alice_project["user_id"] == alice["id"]
+    assert bob_project["user_id"] == bob["id"]
+    assert [project["id"] for project in db.list_projects_for_user(alice["id"])] == [alice_project["id"]]
+    assert [project["id"] for project in db.list_projects_for_user(bob["id"])] == [bob_project["id"]]
+    assert db.get_project_for_user(alice_project["id"], bob["id"]) is None
+
+
+def test_legacy_project_migration_preserves_annotations_and_chat(tmp_path):
+    db_path = tmp_path / "legacy.sqlite3"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY,
+            repo_url TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            local_path TEXT NOT NULL,
+            status TEXT NOT NULL,
+            report TEXT NOT NULL DEFAULT '',
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE source_annotations (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            line INTEGER,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE chat_messages (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("legacy-project", "https://github.com/owner/repo", "repo", "/tmp/repo", "ready", "", "{}", "1", "1"),
+    )
+    conn.execute(
+        "INSERT INTO source_annotations VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("note-1", "legacy-project", "app/main.py", 1, "legacy note", "1", "1"),
+    )
+    conn.execute(
+        "INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?)",
+        ("message-1", "legacy-project", "user", "legacy question", "1"),
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+
+    project = db.get_project("legacy-project")
+    assert project["user_id"] == "default-user"
+    assert db.list_source_annotations("legacy-project")[0]["body"] == "legacy note"
+    assert db.list_chat_messages("legacy-project")[0]["text"] == "legacy question"

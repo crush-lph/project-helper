@@ -41,10 +41,11 @@ import asyncio
 import json
 import os
 import shutil
+import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -141,6 +142,12 @@ class ProjectCreate(BaseModel):
     repo_url: HttpUrl
 
 
+class AuthRequest(BaseModel):
+    """注册/登录请求体。"""
+    username: str = Field(..., min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9_-]+$")
+    password: str = Field(..., min_length=6, max_length=128)
+
+
 class ProjectPinUpdate(BaseModel):
     """更新项目置顶状态的请求体。"""
     pinned: bool
@@ -176,6 +183,53 @@ class SourceAnnotationUpdate(BaseModel):
 
 # ---- 路由定义 ----
 
+def _token_from_authorization(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def get_current_user(authorization: str | None = Header(default=None)) -> dict:
+    token = _token_from_authorization(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="请先登录。")
+    user = db.get_user_by_session(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录。")
+    return user
+
+
+def get_current_user_from_query(token: str = Query(..., min_length=1)) -> dict:
+    user = db.get_user_by_session(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录。")
+    return user
+
+
+@app.post("/api/auth/register")
+def register(payload: AuthRequest):
+    """注册用户，成功后直接创建会话。"""
+    try:
+        user = db.create_user(payload.username, payload.password)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="用户名已存在。") from exc
+    token = db.create_session(user["id"])
+    return {"user": user, "token": token}
+
+
+@app.post("/api/auth/login")
+def login(payload: AuthRequest):
+    """用户名密码登录。"""
+    user = db.verify_user_password(payload.username, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误。")
+    token = db.create_session(user["id"])
+    return {"user": user, "token": token}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "model": settings.deepseek_model, "llm_configured": bool(settings.deepseek_api_key)}
@@ -187,18 +241,18 @@ def metrics():
 
 
 @app.get("/api/projects")
-def list_projects():
+def list_projects(current_user: dict = Depends(get_current_user)):
     """
     获取所有项目列表。
 
     include_report=False 表示不返回完整的报告内容（太大了），
     只返回摘要信息用于侧边栏显示。
     """
-    return {"projects": db.list_projects(include_report=False)}
+    return {"projects": db.list_projects_for_user(current_user["id"], include_report=False)}
 
 
 @app.post("/api/projects")
-def create_project(payload: ProjectCreate):
+def create_project(payload: ProjectCreate, current_user: dict = Depends(get_current_user)):
     """
     创建新项目（或返回已存在的项目）。
 
@@ -215,23 +269,24 @@ def create_project(payload: ProjectCreate):
         # raise ... from exc 保留原始异常链，方便调试
 
     # 如果这个仓库已经分析过，直接返回现有记录（幂等）
-    existing = db.get_project_by_repo(repo_url)
+    existing = db.get_project_by_repo_for_user(repo_url, current_user["id"])
     if existing:
         return existing
 
-    project_id = project_id_for(repo_url)
+    project_id = project_id_for(f"{current_user['id']}:{repo_url}")
     project = {
         "id": project_id,
+        "user_id": current_user["id"],
         "repo_url": repo_url,
         "name": project_name_for(repo_url),
         "local_path": str(settings.clone_dir / project_id),
         "status": "created",
     }
-    return db.upsert_project(project)
+    return db.upsert_project_for_user(current_user["id"], project)
 
 
 @app.get("/api/projects/{project_id}")
-def get_project(project_id: str):
+def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
     """
     获取单个项目详情。
 
@@ -239,13 +294,13 @@ def get_project(project_id: str):
       {project_id} 是路径参数，FastAPI 自动提取并传给函数参数。
       类似 Express 的 router.get("/:projectId", handler)
     """
-    project = db.get_project(project_id)
+    project = db.get_project_for_user(project_id, current_user["id"])
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
 
 
-def get_ready_project(project_id: str) -> dict:
+def get_ready_project(project_id: str, current_user: dict) -> dict:
     """
     获取已完成分析的项目（内部辅助函数）。
 
@@ -254,7 +309,7 @@ def get_ready_project(project_id: str) -> dict:
       2. 项目是否已完成分析（status == "ready"）
       3. 本地源码目录是否存在
     """
-    project = db.get_project(project_id)
+    project = db.get_project_for_user(project_id, current_user["id"])
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     if project["status"] != "ready":
@@ -266,21 +321,21 @@ def get_ready_project(project_id: str) -> dict:
     return project
 
 
-def get_existing_project(project_id: str) -> dict:
+def get_existing_project(project_id: str, current_user: dict) -> dict:
     """获取项目，不要求项目已完成分析。"""
-    project = db.get_project(project_id)
+    project = db.get_project_for_user(project_id, current_user["id"])
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
 
 
-def validate_annotation_target(project_id: str, path: str, line: int | None) -> str:
+def validate_annotation_target(project_id: str, current_user: dict, path: str, line: int | None) -> str:
     """
     校验批注目标文件。
 
     批注不会写回源码，但创建时仍复用源码浏览的安全路径和文本文件校验。
     """
-    project = get_ready_project(project_id)
+    project = get_ready_project(project_id, current_user)
     try:
         source_file = read_source_file(Path(project["local_path"]), path)
     except SourceBrowseError as exc:
@@ -294,14 +349,18 @@ def validate_annotation_target(project_id: str, path: str, line: int | None) -> 
 
 
 @app.get("/api/projects/{project_id}/source/tree")
-def get_source_tree(project_id: str):
+def get_source_tree(project_id: str, current_user: dict = Depends(get_current_user)):
     """获取源码目录树（用于前端文件浏览器）。"""
-    project = get_ready_project(project_id)
+    project = get_ready_project(project_id, current_user)
     return {"tree": build_source_tree(Path(project["local_path"]))}
 
 
 @app.get("/api/projects/{project_id}/source/file")
-def get_source_file(project_id: str, path: str = Query(..., min_length=1)):
+def get_source_file(
+    project_id: str,
+    path: str = Query(..., min_length=1),
+    current_user: dict = Depends(get_current_user),
+):
     """
     读取单个源码文件。
 
@@ -311,7 +370,7 @@ def get_source_file(project_id: str, path: str = Query(..., min_length=1)):
       ... 表示必填，min_length=1 表示不能为空。
       类似 Express 的 req.query.path + Zod 校验。
     """
-    project = get_ready_project(project_id)
+    project = get_ready_project(project_id, current_user)
     try:
         return read_source_file(Path(project["local_path"]), path)
     except SourceBrowseError as exc:
@@ -319,16 +378,24 @@ def get_source_file(project_id: str, path: str = Query(..., min_length=1)):
 
 
 @app.get("/api/projects/{project_id}/source/annotations")
-def list_source_annotations(project_id: str, path: str | None = Query(default=None, min_length=1)):
+def list_source_annotations(
+    project_id: str,
+    path: str | None = Query(default=None, min_length=1),
+    current_user: dict = Depends(get_current_user),
+):
     """获取项目源码批注，可按文件路径过滤。"""
-    get_existing_project(project_id)
+    get_existing_project(project_id, current_user)
     return {"annotations": db.list_source_annotations(project_id, path)}
 
 
 @app.post("/api/projects/{project_id}/source/annotations")
-def create_source_annotation(project_id: str, payload: SourceAnnotationCreate):
+def create_source_annotation(
+    project_id: str,
+    payload: SourceAnnotationCreate,
+    current_user: dict = Depends(get_current_user),
+):
     """为源码文件或源码行创建批注。"""
-    normalized_path = validate_annotation_target(project_id, payload.path, payload.line)
+    normalized_path = validate_annotation_target(project_id, current_user, payload.path, payload.line)
     body = payload.body.strip()
     if not body:
         raise HTTPException(status_code=400, detail="批注内容不能为空。")
@@ -341,9 +408,14 @@ def create_source_annotation(project_id: str, payload: SourceAnnotationCreate):
 
 
 @app.patch("/api/projects/{project_id}/source/annotations/{annotation_id}")
-def update_source_annotation(project_id: str, annotation_id: str, payload: SourceAnnotationUpdate):
+def update_source_annotation(
+    project_id: str,
+    annotation_id: str,
+    payload: SourceAnnotationUpdate,
+    current_user: dict = Depends(get_current_user),
+):
     """更新源码批注正文。"""
-    get_existing_project(project_id)
+    get_existing_project(project_id, current_user)
     body = payload.body.strip()
     if not body:
         raise HTTPException(status_code=400, detail="批注内容不能为空。")
@@ -358,17 +430,26 @@ def update_source_annotation(project_id: str, annotation_id: str, payload: Sourc
 
 
 @app.delete("/api/projects/{project_id}/source/annotations/{annotation_id}", status_code=204)
-def delete_source_annotation(project_id: str, annotation_id: str):
+def delete_source_annotation(
+    project_id: str,
+    annotation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
     """删除源码批注。"""
-    get_existing_project(project_id)
+    get_existing_project(project_id, current_user)
     if not db.delete_source_annotation(project_id=project_id, annotation_id=annotation_id):
         raise HTTPException(status_code=404, detail="批注不存在")
     return None
 
 
 @app.patch("/api/projects/{project_id}/pin")
-def update_project_pin(project_id: str, payload: ProjectPinUpdate):
+def update_project_pin(
+    project_id: str,
+    payload: ProjectPinUpdate,
+    current_user: dict = Depends(get_current_user),
+):
     """切换项目置顶状态。"""
+    get_existing_project(project_id, current_user)
     project = db.set_pinned(project_id, payload.pinned)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -376,22 +457,22 @@ def update_project_pin(project_id: str, payload: ProjectPinUpdate):
 
 
 @app.get("/api/projects/{project_id}/chat/messages")
-def list_chat_messages(project_id: str):
+def list_chat_messages(project_id: str, current_user: dict = Depends(get_current_user)):
     """获取项目的问答历史。"""
-    get_existing_project(project_id)
+    get_existing_project(project_id, current_user)
     return {"messages": db.list_chat_messages(project_id)}
 
 
 @app.delete("/api/projects/{project_id}/chat/messages", status_code=204)
-def clear_chat_messages(project_id: str):
+def clear_chat_messages(project_id: str, current_user: dict = Depends(get_current_user)):
     """清空项目的问答历史。"""
-    get_existing_project(project_id)
+    get_existing_project(project_id, current_user)
     db.clear_chat_messages(project_id)
     return None
 
 
 @app.delete("/api/projects/{project_id}", status_code=204)
-def delete_project(project_id: str):
+def delete_project(project_id: str, current_user: dict = Depends(get_current_user)):
     """
     删除项目（数据库记录 + 本地仓库副本）。
 
@@ -403,7 +484,7 @@ def delete_project(project_id: str):
       类似 Node.js 的 fs.rm(path, { recursive: true })
       ignore_errors=True 忽略删除过程中的错误。
     """
-    project = db.get_project(project_id)
+    project = db.get_project_for_user(project_id, current_user["id"])
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
@@ -422,7 +503,7 @@ def delete_project(project_id: str):
 
 
 @app.get("/api/projects/{project_id}/analyze/stream")
-def stream_analysis(project_id: str):
+def stream_analysis(project_id: str, current_user: dict = Depends(get_current_user_from_query)):
     """
     SSE 流式分析端点。
 
@@ -438,7 +519,7 @@ def stream_analysis(project_id: str):
       Cache-Control: no-cache     → 告诉浏览器不要缓存
       X-Accel-Buffering: no       → 告诉 Nginx 不要缓冲（SSE 必须实时推送）
     """
-    project = db.get_project(project_id)
+    project = db.get_project_for_user(project_id, current_user["id"])
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return StreamingResponse(
@@ -449,7 +530,11 @@ def stream_analysis(project_id: str):
 
 
 @app.post("/api/projects/{project_id}/chat/stream")
-def stream_chat(project_id: str, payload: ChatRequest):
+def stream_chat(
+    project_id: str,
+    payload: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """
     SSE 流式问答端点。
 
@@ -462,7 +547,7 @@ def stream_chat(project_id: str, payload: ChatRequest):
       3. 手动校验 prompt 注入
       这是"纵深防御"思想：多层校验，任何一层都能拦截问题。
     """
-    project = db.get_project(project_id)
+    project = db.get_project_for_user(project_id, current_user["id"])
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     if not payload.question.strip():
