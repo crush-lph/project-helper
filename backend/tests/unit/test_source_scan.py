@@ -6,10 +6,12 @@ from app.source_scan import (
     SourceBrowseError,
     build_source_tree,
     build_tree,
+    number_source_lines,
     read_source_file,
     scan_repository,
     search_code,
 )
+from app.tools.file_ops import read_repo_file
 
 
 def write(path: Path, text: str) -> None:
@@ -42,6 +44,20 @@ def test_search_code_returns_first_matching_line_per_file(tmp_path):
 
     assert "app/main.py:2:" in hits
     assert "docs.md:1:" in hits
+
+
+def test_search_code_can_match_file_paths_for_entrypoint_questions(tmp_path):
+    write(tmp_path / "app" / "main.py", "from fastapi import FastAPI\n")
+
+    hits = search_code(tmp_path, "main.py", limit=5)
+
+    assert "app/main.py:1: 文件路径匹配" in hits
+
+
+def test_number_source_lines_adds_stable_one_based_line_numbers():
+    numbered = number_source_lines("alpha\n  beta\n", start_line=3)
+
+    assert numbered == "   3 | alpha\n   4 |   beta"
 
 
 def test_build_tree_limits_depth_and_entries(tmp_path):
@@ -112,3 +128,15 @@ def test_read_source_file_returns_content_metadata(tmp_path):
     assert "def health" in result["content"]
     assert result["size"] > 0
     assert result["truncated"] is False
+
+
+def test_read_repo_file_returns_citable_line_numbered_content(tmp_path):
+    write(tmp_path / "app" / "main.py", "def health():\n    return True\n")
+
+    result = read_repo_file(str(tmp_path), "app/main.py")
+
+    assert "文件: app/main.py" in result
+    assert "可引用范围: app/main.py:1-2" in result
+    assert "`app/main.py:1`" in result
+    assert "   1 | def health():" in result
+    assert "   2 |     return True" in result

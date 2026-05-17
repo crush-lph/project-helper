@@ -7,6 +7,7 @@ import pytest
 
 from app.services.chat import chat_stream
 
+from .checks import check_has_source_evidence, check_source_line_refs_valid
 from .golden_cases import CHAT_CASES
 
 
@@ -24,3 +25,7 @@ def test_chat_finds_expected_keywords(make_repo, eval_settings, case_index):
 
     for keyword in case.expected_keywords:
         assert keyword in full_text, f"Expected keyword '{keyword}' not found in chat response"
+
+    assert check_has_source_evidence(full_text), "Expected at least one file:line source citation"
+    invalid_refs = check_source_line_refs_valid(full_text, case.local_path_setup)
+    assert not invalid_refs, f"Invalid source citations: {invalid_refs}"

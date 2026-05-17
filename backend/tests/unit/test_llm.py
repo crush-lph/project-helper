@@ -18,4 +18,8 @@ def test_read_repo_file_allows_files_inside_repo(tmp_path):
     root.mkdir()
     (root / "README.md").write_text("# Safe\n", encoding="utf-8")
 
-    assert read_repo_file(str(root), "README.md") == "# Safe\n"
+    result = read_repo_file(str(root), "README.md")
+
+    assert "文件: README.md" in result
+    assert "可引用范围: README.md:1-1" in result
+    assert "   1 | # Safe" in result

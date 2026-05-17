@@ -84,6 +84,14 @@ def read_text(path: Path, max_chars: int = 16_000) -> str:
         return f"读取失败：{exc}"
 
 
+def number_source_lines(content: str, start_line: int = 1) -> str:
+    """Render source text with stable 1-based line numbers for citations."""
+    lines = content.splitlines()
+    if not lines:
+        return f"{start_line:>4} | "
+    return "\n".join(f"{number:>4} | {line}" for number, line in enumerate(lines, start=start_line))
+
+
 def build_source_tree(root: Path, max_entries: int = 900) -> list[dict[str, Any]]:
     root = root.resolve()
     count = 0
@@ -265,6 +273,11 @@ def search_code(root: Path, query: str, limit: int = 20) -> str:
     hits: list[str] = []
     for path in iter_source_files(root, limit=1200):
         rel = path.relative_to(root).as_posix()
+        if query_lower in rel.lower():
+            hits.append(f"{rel}:1: 文件路径匹配")
+            if len(hits) >= limit:
+                break
+            continue
         text = read_text(path, 80_000)
         for number, line in enumerate(text.splitlines(), start=1):
             if query_lower in line.lower():
