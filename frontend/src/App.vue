@@ -1,4 +1,5 @@
 <script setup>
+import AuthPanel from './components/AuthPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import CommandPanel from './components/CommandPanel.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
@@ -12,16 +13,27 @@ const workspace = useProjectHelper()
 </script>
 
 <template>
-  <main class="shell">
+  <AuthPanel
+    v-if="!workspace.isAuthenticated.value"
+    v-model:mode="workspace.authMode.value"
+    v-model:password="workspace.authPassword.value"
+    v-model:username="workspace.authUsername.value"
+    :error="workspace.authError.value"
+    :loading="workspace.authLoading.value"
+    @submit="workspace.authenticate"
+  />
+  <main v-else class="shell">
     <CommandPanel
       v-model="workspace.repoUrl.value"
       :error="workspace.error.value"
       :loading="workspace.loading.value"
       :status-label="workspace.statusLabel.value"
+      :user="workspace.authUser.value"
+      @logout="workspace.logout"
       @submit="workspace.createAndAnalyze"
     />
 
-    <section class="workspace">
+    <section v-if="workspace.isAuthenticated.value" class="workspace">
       <ProjectSidebar
         :active-project-id="workspace.activeProject.value?.id"
         :busy-project-id="workspace.busyProjectId.value"

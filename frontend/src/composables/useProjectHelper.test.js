@@ -89,6 +89,11 @@ function mountComposable() {
 
 describe('useProjectHelper', () => {
   beforeEach(() => {
+    localStorage.clear()
+    localStorage.setItem(
+      'project-helper-auth',
+      JSON.stringify({ user: { id: 'user-1', username: 'tester' }, token: 'test-token' }),
+    )
     FakeEventSource.instances = []
     globalThis.EventSource = FakeEventSource
     globalThis.fetch = vi.fn(async (url, options = {}) => {

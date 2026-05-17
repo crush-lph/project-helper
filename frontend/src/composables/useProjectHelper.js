@@ -17,6 +17,14 @@ const stepOrder = pipelineSteps.map((step) => step.key)
 
 export function useProjectHelper() {
   const dialog = useDialog()
+  const savedAuth = readStoredAuth()
+  const authUser = ref(savedAuth.user)
+  const authToken = ref(savedAuth.token)
+  const authMode = ref('login')
+  const authUsername = ref('')
+  const authPassword = ref('')
+  const authError = ref('')
+  const authLoading = ref(false)
   const repoUrl = ref('https://github.com/fastapi/fastapi')
   const activeProject = ref(null)
   const projects = ref([])
@@ -49,6 +57,7 @@ export function useProjectHelper() {
   let sourceAnnotationRequestToken = 0
 
   const isReady = computed(() => activeProject.value?.status === 'ready')
+  const isAuthenticated = computed(() => Boolean(authToken.value && authUser.value))
   const workspaceTabs = computed(() => [
     { key: 'source', label: '源码', disabled: !isReady.value },
     { key: 'report', label: '报告', disabled: !activeProject.value?.report },
@@ -148,13 +157,75 @@ export function useProjectHelper() {
     activeView.value = view
   }
 
+  function authHeaders(headers = {}) {
+    return authToken.value ? { ...headers, Authorization: `Bearer ${authToken.value}` } : headers
+  }
+
+  async function apiFetch(path, options = {}) {
+    const response = await fetch(path, {
+      ...options,
+      headers: authHeaders(options.headers || {}),
+    })
+    if (response.status === 401) {
+      logout({ silent: true })
+    }
+    return response
+  }
+
+  async function authenticate(mode = authMode.value) {
+    if (!authUsername.value.trim() || !authPassword.value || authLoading.value) return
+    authLoading.value = true
+    authError.value = ''
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: authUsername.value.trim(),
+          password: authPassword.value,
+        }),
+      })
+      if (!response.ok) {
+        throw new Error(await responseDetail(response, mode === 'register' ? '注册失败' : '登录失败'))
+      }
+      const data = await response.json()
+      authUser.value = data.user
+      authToken.value = data.token
+      authPassword.value = ''
+      storeAuth({ user: data.user, token: data.token })
+      await refreshProjects()
+    } catch (err) {
+      authError.value = errorMessage(err, mode === 'register' ? '注册失败' : '登录失败')
+    } finally {
+      authLoading.value = false
+    }
+  }
+
+  function logout({ silent = false } = {}) {
+    closeAnalysisStream()
+    closeChatStream()
+    authUser.value = null
+    authToken.value = ''
+    projects.value = []
+    activeProject.value = null
+    progress.value = []
+    chatMessages.value = []
+    referencedFiles.value = []
+    resetSourceBrowser()
+    clearStoredAuth()
+    if (!silent) {
+      error.value = ''
+      authError.value = ''
+    }
+  }
+
   async function fetchSourceTree(projectId = activeProject.value?.id) {
     if (!projectId || !isReady.value) return
     const requestToken = ++sourceTreeRequestToken
     sourceLoading.value = true
     sourceError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/tree`)
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/source/tree`)
       if (!response.ok) {
         throw new Error(await responseDetail(response, '源码目录加载失败'))
       }
@@ -185,7 +256,7 @@ export function useProjectHelper() {
     sourceFileLoading.value = true
     sourceError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/file?path=${encodeURIComponent(path)}`)
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/source/file?path=${encodeURIComponent(path)}`)
       if (!response.ok) {
         throw new Error(await responseDetail(response, '源码文件加载失败'))
       }
@@ -212,7 +283,7 @@ export function useProjectHelper() {
     sourceAnnotationLoading.value = true
     sourceAnnotationError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations?path=${encodeURIComponent(path)}`)
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/source/annotations?path=${encodeURIComponent(path)}`)
       if (!response.ok) {
         throw new Error(await responseDetail(response, '源码批注加载失败'))
       }
@@ -235,7 +306,7 @@ export function useProjectHelper() {
     sourceAnnotationSaving.value = true
     sourceAnnotationError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations`, {
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/source/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, line, body }),
@@ -259,7 +330,7 @@ export function useProjectHelper() {
     sourceAnnotationSaving.value = true
     sourceAnnotationError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations/${annotation.id}`, {
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/source/annotations/${annotation.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body }),
@@ -283,7 +354,7 @@ export function useProjectHelper() {
     sourceAnnotationSaving.value = true
     sourceAnnotationError.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/source/annotations/${annotation.id}`, {
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/source/annotations/${annotation.id}`, {
         method: 'DELETE',
       })
       if (!response.ok) {
@@ -299,12 +370,24 @@ export function useProjectHelper() {
   }
 
   async function refreshProjects() {
-    const response = await fetch(`${API_BASE}/api/projects`)
+    if (!authToken.value) {
+      projects.value = []
+      return
+    }
+    const response = await apiFetch(`${API_BASE}/api/projects`)
+    if (!response.ok) {
+      projects.value = []
+      return
+    }
     const data = await response.json()
     projects.value = data.projects || []
   }
 
   async function createAndAnalyze() {
+    if (!authToken.value) {
+      error.value = '请先登录。'
+      return
+    }
     closeAnalysisStream()
     closeChatStream()
     loading.value = true
@@ -314,7 +397,7 @@ export function useProjectHelper() {
     chatMessages.value = []
     referencedFiles.value = []
     try {
-      const response = await fetch(`${API_BASE}/api/projects`, {
+      const response = await apiFetch(`${API_BASE}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repo_url: repoUrl.value }),
@@ -335,7 +418,7 @@ export function useProjectHelper() {
 
   function streamAnalysis(projectId) {
     const streamToken = analysisStreamToken
-    const events = new EventSource(`${API_BASE}/api/projects/${projectId}/analyze/stream`)
+    const events = new EventSource(`${API_BASE}/api/projects/${projectId}/analyze/stream?token=${encodeURIComponent(authToken.value)}`)
     activeAnalysisStream = events
     const isCurrentStream = () => activeAnalysisStream === events && analysisStreamToken === streamToken && activeProject.value?.id === projectId
     const closeCurrentStream = () => {
@@ -361,7 +444,7 @@ export function useProjectHelper() {
       progress.value.push({ step: 'done', message: '分析完成，报告已保存到本地缓存。' })
       loading.value = false
       closeCurrentStream()
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}`)
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}`)
       if (!isCurrentStream() && activeProject.value?.id !== projectId) {
         await refreshProjects()
         return
@@ -400,7 +483,8 @@ export function useProjectHelper() {
     closeChatStream()
     loading.value = false
     resetSourceBrowser()
-    const response = await fetch(`${API_BASE}/api/projects/${project.id}`)
+    if (!authToken.value) return
+    const response = await apiFetch(`${API_BASE}/api/projects/${project.id}`)
     activeProject.value = response.ok ? await response.json() : project
     repoUrl.value = activeProject.value.repo_url
     progress.value = [{ step: 'cache', message: '已加载缓存报告。' }]
@@ -416,7 +500,7 @@ export function useProjectHelper() {
   async function loadChatMessages(projectId) {
     if (!projectId) { chatMessages.value = []; return }
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/chat/messages`)
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/chat/messages`)
       if (!response.ok) { chatMessages.value = []; return }
       const data = await response.json()
       chatMessages.value = (data.messages || []).map((m) => ({ role: m.role, text: m.text, thoughts: [] }))
@@ -430,7 +514,7 @@ export function useProjectHelper() {
     busyProjectId.value = project.id
     error.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${project.id}/pin`, {
+      const response = await apiFetch(`${API_BASE}/api/projects/${project.id}/pin`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pinned: !project.pinned }),
@@ -455,7 +539,7 @@ export function useProjectHelper() {
     busyProjectId.value = project.id
     error.value = ''
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${project.id}`, { method: 'DELETE' })
+      const response = await apiFetch(`${API_BASE}/api/projects/${project.id}`, { method: 'DELETE' })
       if (!response.ok) {
         const detail = await response.json()
         throw new Error(detail.detail || '删除项目失败')
@@ -515,7 +599,7 @@ export function useProjectHelper() {
     activeChatAssistant = assistant
 
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/chat/stream`, {
+      const response = await apiFetch(`${API_BASE}/api/projects/${projectId}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -555,11 +639,23 @@ export function useProjectHelper() {
     }
   }
 
-  onMounted(refreshProjects)
+  onMounted(() => {
+    if (authToken.value) {
+      refreshProjects()
+    }
+  })
 
   return {
     activeProject,
     activeView,
+    authError,
+    authLoading,
+    authenticate,
+    authMode,
+    authPassword,
+    authToken,
+    authUser,
+    authUsername,
     asking,
     askQuestion,
     busyProjectId,
@@ -572,9 +668,11 @@ export function useProjectHelper() {
     fetchSourceTree,
     fetchSourceAnnotations,
     isCachedRun,
+    isAuthenticated,
     isReady,
     latestProgress,
     loadProject,
+    logout,
     loadSourceFile,
     loading,
     pipelineSteps,
@@ -687,4 +785,26 @@ function formatAgentEvent(eventData) {
     }
   }
   return null
+}
+
+function readStoredAuth() {
+  try {
+    const raw = localStorage.getItem('project-helper-auth')
+    if (!raw) return { user: null, token: '' }
+    const parsed = JSON.parse(raw)
+    return {
+      user: parsed.user || null,
+      token: parsed.token || '',
+    }
+  } catch {
+    return { user: null, token: '' }
+  }
+}
+
+function storeAuth(auth) {
+  localStorage.setItem('project-helper-auth', JSON.stringify(auth))
+}
+
+function clearStoredAuth() {
+  localStorage.removeItem('project-helper-auth')
 }

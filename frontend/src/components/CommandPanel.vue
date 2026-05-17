@@ -4,9 +4,10 @@ defineProps({
   loading: { type: Boolean, default: false },
   modelValue: { type: String, default: '' },
   statusLabel: { type: String, required: true },
+  user: { type: Object, default: null },
 })
 
-const emit = defineEmits(['update:modelValue', 'submit'])
+const emit = defineEmits(['logout', 'update:modelValue', 'submit'])
 </script>
 
 <template>
@@ -39,6 +40,8 @@ const emit = defineEmits(['update:modelValue', 'submit'])
       </button>
     </div>
     <div class="top-actions" aria-label="工作台状态">
+      <span v-if="user" class="tool-chip user-chip"><User :size="16" />{{ user.username }}</span>
+      <button class="panel-action logout-action" @click="emit('logout')">退出</button>
       <span class="status-badge">{{ statusLabel }}</span>
       <span class="tool-chip"><Database :size="16" />SQLite</span>
       <span class="tool-chip"><TerminalSquare :size="16" />SSE</span>
