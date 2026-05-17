@@ -7,3 +7,7 @@ class ReadFileInput(BaseModel):
 
 class SearchRepoInput(BaseModel):
     query: str = Field(description="搜索关键词，例如 FastAPI、def handle、class User")
+
+
+class SymbolQueryInput(BaseModel):
+    query: str = Field(description="符号名或部分符号名，例如 create_app、Service.health")

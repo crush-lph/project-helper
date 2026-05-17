@@ -128,20 +128,23 @@ DEEPSEEK_MODEL=deepseek-chat
 
 system prompt 在 `backend/app/prompts/agent_system_prompt.md`，要求 Agent 必须基于工具读取到的源码回答，不要凭空猜测；需要时先搜索，再读取文件。
 
-Agent 可用的工具有三个：
+Agent 可用的源码工具包括：
 
 - `list_tree()`：列出项目目录树。
 - `read_file(path)`：读取仓库内指定文件。
 - `search_repo(query)`：全文搜索代码。
+- `find_symbol(query)`：用轻量 AST 符号索引查找 Python 函数、类、方法。
+- `read_symbol(query)`：读取匹配符号的最小源码范围，并返回带行号内容。
 
-这些工具分别定义在 `backend/app/tools/file_ops.py` 和 `backend/app/tools/search.py`。
+这些工具分别定义在 `backend/app/tools/file_ops.py`、`backend/app/tools/search.py` 和 `backend/app/tools/symbols.py`。
+符号索引定义在 `backend/app/symbol_index.py`，当前第一阶段只支持 Python AST；其他语言仍回退到 `search_repo` 和 `read_file`。
 
 ### 证据、上下文与评测治理
 
 源码问答链路按三条规则约束 Agent：
 
 1. 源码依据必须可追溯。`read_file(path)` 不只返回文件原文，还会返回文件路径、可引用行号范围和带行号的源码内容。Agent 的最终回答应引用 `文件路径:行号`，例如 `backend/app/tools/file_ops.py:18`。
-2. 大仓库上下文必须先裁剪。`list_tree()` 的输出会提示目录树已经裁剪；`search_repo(query)` 的输出会提示先搜索再读取最相关的 1-3 个文件。如果 Agent 只基于搜索结果回答，需要说明这是搜索线索，不是完整调用链。
+2. 大仓库上下文必须先裁剪。`find_symbol(query)` / `read_symbol(query)` 用于先按函数、类、方法读取最小源码范围；`list_tree()` 的输出会提示目录树已经裁剪；`search_repo(query)` 的输出会提示先搜索再读取最相关的 1-3 个文件。如果 Agent 只基于搜索结果回答，需要说明这是搜索线索，不是完整调用链。
 3. 评测不只检查“像不像”。`backend/tests/eval/checks.py` 会抽取回答里的 `path:line` 引用，确认文件存在且行号没有越界；聊天 eval 还要求回答至少包含一个源码行号引用。
 
 这三条规则分别回答：

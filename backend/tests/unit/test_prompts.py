@@ -17,6 +17,8 @@ def test_get_agent_system_prompt():
     content = pm.get("agent_system_prompt")
     assert "Agent" in content
     assert "search_repo" in content
+    assert "find_symbol" in content
+    assert "read_symbol" in content
     assert "文件路径:行号" in content
     assert "源码依据" in content
 

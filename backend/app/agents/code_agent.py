@@ -8,7 +8,7 @@ from ..config import Settings
 from ..llm import get_llm
 from ..memory import get_checkpointer
 from ..prompts.manager import PromptManager
-from ..tools import build_file_ops_tools, build_search_tools
+from ..tools import build_file_ops_tools, build_search_tools, build_symbol_tools
 
 _prompts = PromptManager()
 
@@ -23,7 +23,7 @@ def create_code_agent(settings: Settings, root_path: str):
     if llm is None:
         return None
 
-    tools = build_file_ops_tools(root_path) + build_search_tools(root_path)
+    tools = build_file_ops_tools(root_path) + build_search_tools(root_path) + build_symbol_tools(root_path)
     system_prompt = _prompts.get("agent_system_prompt")
 
     return create_react_agent(
