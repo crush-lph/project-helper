@@ -419,7 +419,7 @@ export function useProjectHelper() {
       const response = await fetch(`${API_BASE}/api/projects/${projectId}/chat/messages`)
       if (!response.ok) { chatMessages.value = []; return }
       const data = await response.json()
-      chatMessages.value = (data.messages || []).map((m) => ({ role: m.role, text: m.text }))
+      chatMessages.value = (data.messages || []).map((m) => ({ role: m.role, text: m.text, thoughts: [] }))
     } catch {
       chatMessages.value = []
     }
@@ -509,7 +509,7 @@ export function useProjectHelper() {
     referencedFiles.value = []
     const history = chatMessages.value.map((m) => ({ role: m.role, text: m.text }))
     chatMessages.value.push({ role: 'user', text: userText + (files.length ? ` [引用: ${files.join(', ')}]` : '') })
-    chatMessages.value.push({ role: 'assistant', text: '' })
+    chatMessages.value.push({ role: 'assistant', text: '', thoughts: [] })
     const assistant = chatMessages.value.at(-1)
     activeChatController = controller
     activeChatAssistant = assistant
@@ -657,10 +657,8 @@ function handleChatEvent(event, assistant) {
     return false
   }
   if (event.event === 'agent') {
-    const text = formatAgentEvent(event.data)
-    if (text) {
-      assistant.text += `${assistant.text ? '\n\n' : ''}${text}`
-    }
+    const thought = formatAgentEvent(event.data)
+    if (thought) assistant.thoughts = [...(assistant.thoughts || []), thought]
     return false
   }
   if (event.event === 'failed' || event.event === 'error') {
@@ -674,12 +672,19 @@ function formatAgentEvent(eventData) {
   const data = eventData?.data || {}
   if (kind === 'action') {
     const tool = data.tool || 'tool'
-    const input = data.input ? `：${data.input}` : ''
-    return `> 正在调用 \`${tool}\`${input}`
+    return {
+      type: 'action',
+      label: `调用 ${tool}`,
+      detail: data.input || '',
+    }
   }
   if (kind === 'observation') {
     const output = data.output || ''
-    return output ? `> 工具返回：\n\n\`\`\`text\n${output}\n\`\`\`` : '> 工具已返回结果。'
+    return {
+      type: 'observation',
+      label: '工具返回',
+      detail: output || '工具已返回结果。',
+    }
   }
-  return ''
+  return null
 }

@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import git
 import httpx
+from langgraph.errors import GraphRecursionError
 
 
 def classify_error(exc: Exception) -> tuple[str, str, Exception]:
     """将异常分类为 transient / rate_limit / permanent，返回 (类型, 用户提示, 原始异常)。"""
+    if isinstance(exc, GraphRecursionError):
+        return (
+            "agent_recursion_limit",
+            "Agent 检索步数过多，已超过本次回答的安全上限。请缩小问题范围，"
+            "例如指定文件、函数名、组件名，或先问“这个仓库的入口文件有哪些”。",
+            exc,
+        )
+
     if isinstance(exc, httpx.TimeoutException | httpx.ConnectError):
         return "transient", "网络连接超时，请稍后重试。", exc
     

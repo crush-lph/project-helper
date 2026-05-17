@@ -130,6 +130,15 @@ function onSubmit() {
       <div v-for="(message, index) in messages" :key="index" :class="['message', message.role]">
         <div v-if="message.role === 'assistant'" class="msg-avatar assistant-avatar"><Sparkles :size="14" /></div>
         <div class="msg-body">
+          <details v-if="message.role === 'assistant' && message.thoughts?.length" class="agent-thoughts">
+            <summary>工具过程 · {{ message.thoughts.length }} 步</summary>
+            <div class="thought-list">
+              <div v-for="(thought, thoughtIndex) in message.thoughts" :key="thoughtIndex" class="thought-item">
+                <span class="thought-label">{{ thought.label }}</span>
+                <code v-if="thought.detail" class="thought-detail">{{ thought.detail }}</code>
+              </div>
+            </div>
+          </details>
           <div v-if="message.role === 'assistant'" class="markdown-body compact" v-html="renderMarkdown(message.text || '思考中...')"></div>
           <p v-else>{{ message.text }}</p>
         </div>
@@ -203,6 +212,50 @@ function onSubmit() {
 .user-avatar {
   background: rgba(134, 239, 172, 0.25);
   color: #16a34a;
+}
+
+.agent-thoughts {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.22);
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 12px;
+}
+
+.agent-thoughts summary {
+  cursor: pointer;
+  user-select: none;
+  color: rgba(203, 213, 225, 0.76);
+}
+
+.thought-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.thought-item {
+  display: grid;
+  gap: 3px;
+}
+
+.thought-label {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.thought-detail {
+  max-height: 72px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: rgba(2, 6, 23, 0.28);
+  color: rgba(203, 213, 225, 0.62);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .ask-form {

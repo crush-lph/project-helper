@@ -11,6 +11,7 @@ from ..prompts.manager import PromptManager
 from ..tools import build_file_ops_tools, build_search_tools, build_symbol_tools
 
 _prompts = PromptManager()
+AGENT_RECURSION_LIMIT = 80
 
 
 def create_code_agent(settings: Settings, root_path: str):
@@ -43,7 +44,10 @@ async def stream_agent_events(agent, question: str, thread_id: str) -> AsyncGene
     - on_tool_end → 推送 Tool 输出
     """
     input_msg = {"messages": [("human", question)]}
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": AGENT_RECURSION_LIMIT,
+    }
 
     async for event in agent.astream_events(input_msg, config=config, version="v2"):
         kind = event.get("event")

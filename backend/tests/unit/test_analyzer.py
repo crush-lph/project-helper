@@ -1,6 +1,9 @@
 import asyncio
 import time
 
+from langgraph.errors import GraphRecursionError
+
+from app.agents.code_agent import stream_agent_events
 from app.agents.report_agent import local_report
 from app.config import Settings
 from app.database import Database
@@ -82,6 +85,49 @@ def test_chat_stream_yields_agent_steps_incrementally(monkeypatch, tmp_path):
     assert first.startswith("event: agent")
     assert elapsed < 0.1
     assert rest[-1] == "event: done\ndata: {}\n\n"
+
+
+def test_stream_agent_events_sets_higher_recursion_limit():
+    class FakeAgent:
+        def __init__(self):
+            self.config = None
+
+        async def astream_events(self, input_msg, config=None, version=None):
+            self.config = config
+            if False:
+                yield {}
+
+    agent = FakeAgent()
+
+    async def collect():
+        return [event async for event in stream_agent_events(agent, "question", thread_id="proj-1")]
+
+    asyncio.run(collect())
+
+    assert agent.config["configurable"]["thread_id"] == "proj-1"
+    assert agent.config["recursion_limit"] == 80
+
+
+def test_chat_stream_reports_recursion_limit_as_actionable_error(monkeypatch, tmp_path):
+    class LoopingAgent:
+        async def astream_events(self, input_msg, config=None, version=None):
+            raise GraphRecursionError("Recursion limit of 25 reached without hitting a stop condition.")
+            if False:
+                yield {}
+
+    from app.services import chat as chat_service
+    monkeypatch.setattr(chat_service, "create_code_agent", lambda settings, root_path: LoopingAgent())
+    settings = Settings(deepseek_api_key="test-key", data_dir=tmp_path / "data")
+    project = {"local_path": str(tmp_path), "id": "proj-1"}
+
+    async def collect():
+        return [chunk async for chunk in chat_stream(settings, project, "分析 React 仓库")]
+
+    chunks = asyncio.run(collect())
+
+    assert chunks[0].startswith("event: failed")
+    assert "Agent 检索步数过多" in chunks[0]
+    assert "缩小问题范围" in chunks[0]
 
 
 def test_analyze_stream_serializes_concurrent_runs_for_same_project(monkeypatch, tmp_path):

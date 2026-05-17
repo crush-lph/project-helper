@@ -41,4 +41,27 @@ describe('ChatPanel', () => {
     expect(wrapper.get('button.stop-answer').attributes('disabled')).toBeUndefined()
     expect(wrapper.emitted('stop')).toHaveLength(1)
   })
+
+  it('renders agent thoughts separately from the assistant answer', () => {
+    const wrapper = mount(ChatPanel, {
+      props: {
+        isReady: true,
+        messages: [{
+          role: 'assistant',
+          text: '入口在 `app/main.py`。',
+          thoughts: [
+            { type: 'action', label: '调用 search_repo', detail: '入口' },
+            { type: 'observation', label: '工具返回', detail: 'app/main.py:1: def health()' },
+          ],
+        }],
+      },
+      global: { stubs: iconStubs },
+    })
+
+    expect(wrapper.get('.agent-thoughts').text()).toContain('工具过程')
+    expect(wrapper.get('.agent-thoughts').text()).toContain('调用 search_repo')
+    expect(wrapper.get('.agent-thoughts').text()).toContain('app/main.py:1')
+    expect(wrapper.get('.markdown-body').text()).toContain('入口在')
+    expect(wrapper.get('.markdown-body').text()).not.toContain('工具返回')
+  })
 })
