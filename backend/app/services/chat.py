@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -12,10 +11,7 @@ from ..config import Settings
 from ..errors import classify_error
 from ..source_scan import search_code
 from ..tools.file_ops import read_repo_file
-
-
-def sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+from ..utils.sse import sse
 
 
 def _build_file_context(root: Path, file_paths: list[str]) -> str:

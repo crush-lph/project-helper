@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -15,28 +14,22 @@ from ..database import Database
 from ..errors import classify_error
 from ..repository import clone_or_update
 from ..source_scan import scan_repository
+from ..utils.sse import sse
 
-
-def sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def make_analysis_locks() -> defaultdict[str, asyncio.Lock]:
-    return defaultdict(asyncio.Lock)
+_analysis_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def analyze_project_stream(
     db: Database,
     settings: Settings,
     project: dict[str, Any],
-    locks: defaultdict[str, asyncio.Lock] | None = None,
 ) -> AsyncGenerator[str, None]:
     """4 阶段 SSE 分析管线：clone → scan → report → save。"""
     project_id = project["id"]
-    analysis_locks = locks if locks is not None else make_analysis_locks()
+    user_id = project["user_id"]
 
-    async with analysis_locks[project_id]:
-        current_project = db.get_project(project_id) or project
+    async with _analysis_locks[project_id]:
+        current_project = db.get_project_for_user(project_id, user_id) or project
 
         if current_project["status"] == "ready" and current_project.get("report"):
             yield sse("cached", {"message": "命中缓存，直接返回上次分析结果。", "project_id": project_id})

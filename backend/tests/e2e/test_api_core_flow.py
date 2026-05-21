@@ -2,8 +2,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-import app.main as main_module
-from app.config import Settings
+import app.routers.chat as chat_module
+from app.config import Settings, get_settings
 from app.database import Database
 from app.main import app
 from app.services import analysis as analysis_service
@@ -22,8 +22,12 @@ def parse_sse_events(text: str):
 def install_test_runtime(monkeypatch, tmp_path):
     settings = Settings(deepseek_api_key="", data_dir=tmp_path / "data")
     db = Database(settings.db_path)
-    monkeypatch.setattr(main_module, "settings", settings)
-    monkeypatch.setattr(main_module, "db", db)
+    # Clear cached settings so lifespan uses our test settings
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.config.get_settings", lambda: settings)
+    # Set app.state directly for deps that read from request.app.state
+    app.state.settings = settings
+    app.state.db = db
     return settings, db
 
 
@@ -69,7 +73,8 @@ def test_project_create_analyze_cache_and_chat_flow(monkeypatch, tmp_path):
     assert stream.status_code == 200
     events = parse_sse_events(stream.text)
     assert [name for name, _ in events] == ["progress", "progress", "progress", "done"]
-    assert db.get_project(project["id"])["status"] == "ready"
+    user_id = project["user_id"]
+    assert db.get_project_for_user(project["id"], user_id)["status"] == "ready"
 
     loaded = client.get(f"/api/projects/{project['id']}", headers=headers)
     assert loaded.status_code == 200
@@ -170,7 +175,7 @@ def test_project_create_analyze_cache_and_chat_flow(monkeypatch, tmp_path):
 
     deleted = client.delete(f"/api/projects/{project['id']}", headers=headers)
     assert deleted.status_code == 204
-    assert db.get_project(project["id"]) is None
+    assert db.get_project_for_user(project["id"], user_id) is None
     assert not (settings.clone_dir / project["id"]).exists()
 
 
@@ -322,7 +327,7 @@ def test_chat_stream_returns_failed_event_when_stream_crashes(monkeypatch, tmp_p
         raise RuntimeError("stream exploded")
         yield ""
 
-    monkeypatch.setattr(main_module, "chat_stream", broken_chat_stream)
+    monkeypatch.setattr(chat_module, "chat_stream", broken_chat_stream)
     client = TestClient(app)
 
     response = client.post(
@@ -334,4 +339,4 @@ def test_chat_stream_returns_failed_event_when_stream_crashes(monkeypatch, tmp_p
     assert response.status_code == 200
     events = parse_sse_events(response.text)
     assert [name for name, _ in events] == ["failed", "done"]
-    assert events[0][1]["error_type"] == "RuntimeError"
+    assert events[0][1]["error_type"] == "permanent"

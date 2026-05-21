@@ -14,7 +14,6 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-DEFAULT_USER_ID = "default-user"
 PASSWORD_ITERATIONS = 120_000
 
 
@@ -69,7 +68,6 @@ class Database:
                 )
                 """
             )
-            self._ensure_default_user(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS projects (
@@ -140,18 +138,15 @@ class Database:
             """
         )
 
-    def _ensure_default_user(self, conn: sqlite3.Connection) -> None:
+    def _migrate_projects_to_users(self, conn: sqlite3.Connection) -> None:
+        # Ensure default-user exists for legacy data migration
         now = utc_now()
         salt, password_hash = self._hash_password(secrets.token_urlsafe(24))
         conn.execute(
-            """
-            INSERT OR IGNORE INTO users (id, username, password_salt, password_hash, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (DEFAULT_USER_ID, "default", salt, password_hash, now),
+            "INSERT OR IGNORE INTO users (id, username, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            ("default-user", "default", salt, password_hash, now),
         )
 
-    def _migrate_projects_to_users(self, conn: sqlite3.Connection) -> None:
         existing_tables = {
             row["name"]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
@@ -198,7 +193,7 @@ class Database:
                 summary_json, created_at, updated_at, {pinned_expr}
             FROM projects_legacy
             """,
-            (DEFAULT_USER_ID,),
+            ("default-user",),
         )
         conn.execute("DROP TABLE projects_legacy")
 
@@ -282,9 +277,6 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
-    def upsert_project(self, project: dict[str, Any]) -> dict[str, Any]:
-        return self.upsert_project_for_user(project.get("user_id", DEFAULT_USER_ID), project)
-
     def upsert_project_for_user(self, user_id: str, project: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
         with self.connect() as conn:
@@ -312,22 +304,12 @@ class Database:
             ).fetchone()
         return self._row_to_project(row)
 
-    def get_project(self, project_id: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-        return self._row_to_project(row) if row else None
-
     def get_project_for_user(self, project_id: str, user_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT * FROM projects WHERE id = ? AND user_id = ?",
                 (project_id, user_id),
             ).fetchone()
-        return self._row_to_project(row) if row else None
-
-    def get_project_by_repo(self, repo_url: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute("SELECT * FROM projects WHERE repo_url = ?", (repo_url,)).fetchone()
         return self._row_to_project(row) if row else None
 
     def get_project_by_repo_for_user(self, repo_url: str, user_id: str) -> dict[str, Any] | None:
@@ -337,28 +319,6 @@ class Database:
                 (repo_url, user_id),
             ).fetchone()
         return self._row_to_project(row) if row else None
-
-    def list_projects(self, include_report: bool = True) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM projects
-                ORDER BY
-                    CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END,
-                    pinned_at DESC,
-                    updated_at DESC
-                """
-            ).fetchall()
-        projects = [self._row_to_project(row) for row in rows]
-        if not include_report:
-            for project in projects:
-                project["report"] = ""
-                project["summary"] = {
-                    "file_count": project.get("summary", {}).get("file_count", 0),
-                    "stack": project.get("summary", {}).get("stack", []),
-                    "llm": project.get("summary", {}).get("llm", ""),
-                }
-        return projects
 
     def list_projects_for_user(self, user_id: str, include_report: bool = True) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -415,6 +375,14 @@ class Database:
     def delete_project(self, project_id: str) -> bool:
         with self.connect() as conn:
             cursor = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        return cursor.rowcount > 0
+
+    def delete_project_for_user(self, project_id: str, user_id: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM projects WHERE id = ? AND user_id = ?",
+                (project_id, user_id),
+            )
         return cursor.rowcount > 0
 
     def list_source_annotations(self, project_id: str, path: str | None = None) -> list[dict[str, Any]]:

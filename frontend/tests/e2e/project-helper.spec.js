@@ -25,6 +25,18 @@ const sourceTree = [
 async function installApiMocks(page) {
   let annotations = []
 
+  await page.route('**/api/auth/login', async (route) => {
+    await route.fulfill({
+      json: { user: { id: 'user-1', username: 'tester' }, token: 'test-token' },
+    })
+  })
+
+  await page.route('**/api/auth/register', async (route) => {
+    await route.fulfill({
+      json: { user: { id: 'user-1', username: 'tester' }, token: 'test-token' },
+    })
+  })
+
   await page.route('**/api/projects', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { projects: [readyProject] } })
@@ -98,12 +110,20 @@ async function installApiMocks(page) {
   })
 }
 
+async function login(page) {
+  await page.getByPlaceholder('alice').fill('tester')
+  await page.getByPlaceholder('至少 6 位').fill('password123')
+  await page.locator('form').getByRole('button', { name: '登录' }).click()
+  await expect(page.getByRole('button', { name: /demo-repo/ })).toBeVisible()
+}
+
 test.beforeEach(async ({ page }) => {
   await installApiMocks(page)
 })
 
 test('loads a cached project, browses source, and highlights code', async ({ page }) => {
   await page.goto('/')
+  await login(page)
 
   await page.getByRole('button', { name: /demo-repo/ }).click()
   await expect(page.getByRole('button', { name: '折叠 src' })).toBeVisible()
@@ -116,6 +136,7 @@ test('loads a cached project, browses source, and highlights code', async ({ pag
 
 test('creates, edits, and deletes a source annotation', async ({ page }) => {
   await page.goto('/')
+  await login(page)
   await page.getByRole('button', { name: /demo-repo/ }).click()
   await page.getByRole('button', { name: '查看 src/main.js' }).click()
 
@@ -140,6 +161,7 @@ test('creates, edits, and deletes a source annotation', async ({ page }) => {
 
 test('switches between source, report, and chat workflows', async ({ page }) => {
   await page.goto('/')
+  await login(page)
   await page.getByRole('button', { name: /demo-repo/ }).click()
 
   await page.getByRole('button', { name: '报告' }).click()
@@ -163,6 +185,7 @@ test('stops an in-flight chat answer', async ({ page }) => {
   })
 
   await page.goto('/')
+  await login(page)
   await page.getByRole('button', { name: /demo-repo/ }).click()
   await page.getByRole('button', { name: '问答' }).click()
   await page.getByRole('textbox').last().fill('请解释架构')

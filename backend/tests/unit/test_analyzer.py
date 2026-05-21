@@ -8,8 +8,9 @@ from app.agents.report_agent import local_report
 from app.config import Settings
 from app.database import Database
 from app.services import analysis as analysis_service
-from app.services.analysis import analyze_project_stream, make_analysis_locks, sse
+from app.services.analysis import analyze_project_stream
 from app.services.chat import chat_stream
+from app.utils.sse import sse
 
 
 def test_sse_formats_named_event_with_json_payload():
@@ -143,21 +144,24 @@ def test_analyze_stream_serializes_concurrent_runs_for_same_project(monkeypatch,
 
     settings = Settings(deepseek_api_key="", data_dir=tmp_path / "data")
     db = Database(settings.db_path)
-    project = db.upsert_project(
+    db.create_user("testuser", "secret-1")
+    user = db.verify_user_password("testuser", "secret-1")
+    uid = user["id"]
+    project = db.upsert_project_for_user(
+        uid,
         {
             "id": "project-1",
+            "user_id": uid,
             "repo_url": "https://github.com/owner/repo",
             "name": "repo",
             "local_path": str(repo_root),
             "status": "created",
-        }
+        },
     )
     monkeypatch.setattr(analysis_service, "clone_or_update", fake_clone_or_update)
 
-    project_locks = make_analysis_locks()
-
     async def collect():
-        return [chunk async for chunk in analyze_project_stream(db, settings, project, locks=project_locks)]
+        return [chunk async for chunk in analyze_project_stream(db, settings, project)]
 
     async def run_pair():
         return await asyncio.gather(collect(), collect())
