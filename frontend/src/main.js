@@ -17,19 +17,24 @@ import {
   Code2,
   Database,
   FileCode2,
+  FileSearch,
   FileText,
   Filter,
+  Folder,
   FolderTree,
   FolderGit2,
   FolderOpen,
   GitBranch,
   GitPullRequestArrow,
   Loader2,
+  LogOut,
   MessageSquarePlus,
   MessageSquareText,
+  PanelsTopLeft,
   Pin,
   PinOff,
   Play,
+  Plus,
   RadioTower,
   RefreshCw,
   Search,
@@ -38,6 +43,7 @@ import {
   TerminalSquare,
   Trash2,
   User,
+  X,
   Zap,
 } from 'lucide-vue-next'
 import './styles.css'
@@ -95,19 +101,24 @@ app.component('DatabaseZap', DatabaseZap)
 app.component('Code2', Code2)
 app.component('Database', Database)
 app.component('FileCode2', FileCode2)
+app.component('FileSearch', FileSearch)
 app.component('FileText', FileText)
 app.component('Filter', Filter)
+app.component('Folder', Folder)
 app.component('FolderTree', FolderTree)
 app.component('FolderGit2', FolderGit2)
 app.component('FolderOpen', FolderOpen)
 app.component('GitBranch', GitBranch)
 app.component('GitPullRequestArrow', GitPullRequestArrow)
 app.component('Loader2', Loader2)
+app.component('LogOut', LogOut)
 app.component('MessageSquarePlus', MessageSquarePlus)
 app.component('MessageSquareText', MessageSquareText)
+app.component('PanelsTopLeft', PanelsTopLeft)
 app.component('Pin', Pin)
 app.component('PinOff', PinOff)
 app.component('Play', Play)
+app.component('Plus', Plus)
 app.component('RadioTower', RadioTower)
 app.component('RefreshCw', RefreshCw)
 app.component('Search', Search)
@@ -116,5 +127,6 @@ app.component('Sparkles', Sparkles)
 app.component('TerminalSquare', TerminalSquare)
 app.component('Trash2', Trash2)
 app.component('User', User)
+app.component('X', X)
 app.component('Zap', Zap)
 app.mount('#app')

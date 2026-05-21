@@ -16,18 +16,31 @@ function submit() {
 
 <template>
   <main class="auth-shell">
+    <section class="auth-intro">
+      <span class="auth-logo">P</span>
+      <div>
+        <h1>project-helper</h1>
+        <p>导入仓库，生成源码报告，并和项目专属 Agent 一起学习代码。</p>
+      </div>
+      <div class="auth-spec-list">
+        <span>IDE workspace</span>
+        <span>Project Agent</span>
+        <span>Source report</span>
+      </div>
+    </section>
+
     <section class="auth-panel">
-      <div class="brand auth-brand">
-        <span class="brand-mark"><User :size="22" /></span>
+      <div class="auth-panel-head">
+        <span class="auth-panel-mark"><LogIn :size="18" /></span>
         <div>
-          <strong>project-helper</strong>
-          <span>登录后进入源码学习工作台</span>
+          <strong>{{ mode === 'register' ? '创建账号' : '登录工作区' }}</strong>
+          <span>进入你的源码学习工作区</span>
         </div>
       </div>
 
       <div class="auth-tabs" aria-label="认证方式">
-        <button :class="{ active: mode === 'login' }" @click="emit('update:mode', 'login')">登录</button>
-        <button :class="{ active: mode === 'register' }" @click="emit('update:mode', 'register')">注册</button>
+        <button data-mode="login" :class="{ active: mode === 'login' }" @click="emit('update:mode', 'login')">登录</button>
+        <button data-mode="register" :class="{ active: mode === 'register' }" @click="emit('update:mode', 'register')">注册</button>
       </div>
 
       <form class="auth-form" @submit.prevent="submit">
@@ -50,9 +63,9 @@ function submit() {
             @input="emit('update:password', $event.target.value)"
           />
         </label>
-        <button class="primary-action auth-submit" :disabled="loading" type="submit">
+        <button class="auth-submit" :disabled="loading" type="submit">
           <Loader2 v-if="loading" class="spin" :size="18" />
-          <User v-else :size="18" />
+          <LogIn v-else :size="18" />
           <span>{{ mode === 'register' ? '创建账号' : '登录' }}</span>
         </button>
       </form>

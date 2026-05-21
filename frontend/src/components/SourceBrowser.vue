@@ -336,55 +336,16 @@ function detectBraceFolds(lines) {
 </script>
 
 <template>
-  <section class="source-panel">
-    <div class="panel-title">
-      <span><ScanSearch :size="20" />源码浏览</span>
-      <button v-if="isReady" class="panel-action" :disabled="loading" @click="emit('refresh')">
-        <Loader2 v-if="loading" class="spin" :size="16" />
-        <RefreshCw v-else :size="16" />
-        <span>{{ loading ? '加载中' : '刷新目录' }}</span>
-      </button>
-    </div>
+  <section class="source-panel editor-source">
     <p v-if="error" class="error source-error">{{ error }}</p>
     <div v-if="isReady" class="source-browser">
-      <div class="source-tree" aria-label="源码目录树">
-        <div class="source-tree-head">
-          <span class="tool-chip"><FolderTree :size="16" />目录树</span>
-          <span class="tool-chip"><Filter :size="16" />文本源码</span>
-        </div>
-        <button
-          v-for="item in sourceRows"
-          :key="item.path"
-          :class="['source-row', item.type, { active: file?.path === item.path, collapsed: item.collapsed }]"
-          :disabled="item.type === 'file' && fileLoading"
-          :aria-expanded="item.type === 'directory' ? String(!item.collapsed) : undefined"
-          :aria-label="item.type === 'directory' ? `${item.collapsed ? '展开' : '折叠'} ${item.path}` : `查看 ${item.path}`"
-          :style="{ paddingLeft: `${12 + item.depth * 18}px` }"
-          @click="handleRowClick(item)"
-        >
-          <span class="source-toggle">
-            <ChevronRight v-if="item.type === 'directory' && item.collapsed" :size="14" />
-            <ChevronDown v-else-if="item.type === 'directory'" :size="14" />
-          </span>
-          <FolderOpen v-if="item.type === 'directory'" class="source-kind-icon" :size="15" />
-          <FileText v-else class="source-kind-icon" :size="15" />
-          <span>{{ item.name }}</span>
-        </button>
-        <p v-if="!sourceRows.length && !loading" class="muted source-empty">暂无可预览源码文件。</p>
-        <p v-if="loading" class="muted source-empty">正在读取目录...</p>
-      </div>
       <div class="source-preview">
         <div v-if="file" class="source-file-head">
           <span class="file-head-main">
-            <span class="file-icon"><FileCode2 :size="18" /></span>
             <strong>{{ file.path }}</strong>
           </span>
           <span class="file-actions">
             <small>{{ file.size }} bytes{{ file.truncated ? ' · 已截断' : '' }}</small>
-            <button class="icon-action annotate-file-action" :disabled="annotationSaving" @click="startAnnotation(null)">
-              <MessageSquarePlus :size="15" />
-              <span>文件批注</span>
-            </button>
           </span>
         </div>
         <div v-if="file" class="annotation-workbench" aria-label="源码批注">
