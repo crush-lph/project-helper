@@ -11,7 +11,7 @@ from pydantic import BaseModel, HttpUrl
 from ..config import Settings
 from ..database import Database
 from ..deps import get_current_user, get_db, get_existing_project, get_settings
-from ..repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
+from ..core.repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 

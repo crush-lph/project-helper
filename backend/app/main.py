@@ -121,7 +121,7 @@ def health():
 
 @app.get("/api/metrics")
 def metrics():
-    from .observability import get_metrics
+    from .llm.observability import get_metrics
     return get_metrics().snapshot()
 
 

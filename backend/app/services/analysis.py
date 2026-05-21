@@ -11,9 +11,9 @@ import anyio
 from ..agents.report_agent import generate_llm_report, local_report
 from ..config import Settings
 from ..database import Database
-from ..errors import classify_error
-from ..repository import clone_or_update
-from ..source_scan import scan_repository
+from ..utils.errors import classify_error
+from ..core.repository import clone_or_update
+from ..core.source_scan import scan_repository
 from ..utils.sse import sse
 
 _analysis_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)

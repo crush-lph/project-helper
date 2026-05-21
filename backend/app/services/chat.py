@@ -8,8 +8,8 @@ import anyio
 
 from ..agents.code_agent import create_code_agent, stream_agent_events
 from ..config import Settings
-from ..errors import classify_error
-from ..source_scan import search_code
+from ..utils.errors import classify_error
+from ..core.source_scan import search_code
 from ..tools.file_ops import read_repo_file
 from ..utils.sse import sse
 

@@ -1,6 +1,6 @@
 import pytest
 
-from app.repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
+from app.core.repository import RepositoryError, normalize_repo_url, project_id_for, project_name_for
 
 ALLOWED_HOSTS = {"github.com", "www.github.com"}
 

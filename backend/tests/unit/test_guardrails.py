@@ -1,7 +1,7 @@
 """Tests for the guardrails module."""
 from __future__ import annotations
 
-from app.guardrails import check_prompt_injection
+from app.utils.guardrails import check_prompt_injection
 
 
 def test_normal_chinese_question_passes():

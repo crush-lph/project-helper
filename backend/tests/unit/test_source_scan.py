@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.source_scan import (
+from app.core.source_scan import (
     SourceBrowseError,
     build_source_tree,
     build_tree,

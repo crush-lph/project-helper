@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from langgraph.prebuilt import create_react_agent
 
 from ..config import Settings
-from ..llm import get_llm
+from ..llm.client import get_llm
 from ..memory import get_checkpointer
 from ..prompts.manager import PromptManager
 from ..tools import build_file_ops_tools, build_search_tools, build_symbol_tools

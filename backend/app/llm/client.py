@@ -3,7 +3,7 @@ from __future__ import annotations
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from .config import Settings
+from ..config import Settings
 from .observability import LLMCallLogger
 
 

@@ -8,7 +8,7 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from app.observability import LLMCallLogger, get_logger
+from app.llm.observability import LLMCallLogger, get_logger
 
 
 def test_extract_token_usage_from_llm_output():

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from ..database import Database
 from ..deps import get_current_user, get_db, get_existing_project
-from ..source_scan import SourceBrowseError, build_source_tree, read_source_file
+from ..core.source_scan import SourceBrowseError, build_source_tree, read_source_file
 
 router = APIRouter(prefix="/api/projects/{project_id}/source", tags=["source"])
 

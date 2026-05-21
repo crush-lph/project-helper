@@ -4,7 +4,7 @@ from pathlib import Path
 
 from langchain.tools import tool
 
-from ..symbol_index import find_symbols, read_symbol as read_index_symbol
+from ..core.symbol_index import find_symbols, read_symbol as read_index_symbol
 from .schemas import SymbolQueryInput
 
 

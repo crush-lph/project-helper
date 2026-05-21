@@ -4,7 +4,7 @@ from pathlib import Path
 
 from langchain.tools import tool
 
-from ..source_scan import search_code
+from ..core.source_scan import search_code
 from .schemas import SearchRepoInput
 
 

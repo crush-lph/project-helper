@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.symbol_index import build_symbol_index, find_symbols, read_symbol
+from app.core.symbol_index import build_symbol_index, find_symbols, read_symbol
 
 
 def write(path: Path, text: str) -> None:

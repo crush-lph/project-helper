@@ -4,7 +4,7 @@ from pathlib import Path
 
 from langchain.tools import tool
 
-from ..source_scan import SourceBrowseError, build_tree, number_source_lines, read_source_file
+from ..core.source_scan import SourceBrowseError, build_tree, number_source_lines, read_source_file
 from .schemas import ReadFileInput
 
 

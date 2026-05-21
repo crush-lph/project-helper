@@ -7,7 +7,7 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from ..config import Settings
-from ..llm import get_llm
+from ..llm.client import get_llm
 from ..prompts.manager import PromptManager
 
 logger = logging.getLogger(__name__)

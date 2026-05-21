@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 from ..config import Settings
 from ..database import Database
 from ..deps import get_current_user, get_db, get_existing_project, get_settings
-from ..errors import classify_error
-from ..guardrails import check_prompt_injection
+from ..utils.errors import classify_error
+from ..utils.guardrails import check_prompt_injection
 from ..services.chat import chat_stream
 from ..utils.sse import parse_sse_data
 

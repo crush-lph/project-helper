@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from app.errors import classify_error
+from app.utils.errors import classify_error
 
 
 def test_classify_timeout_as_transient():
